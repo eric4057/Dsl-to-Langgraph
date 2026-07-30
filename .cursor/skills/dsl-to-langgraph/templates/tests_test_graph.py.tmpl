@@ -1,0 +1,13 @@
+from graph import build_graph
+
+
+def test_build_graph():
+    g = build_graph()
+    assert g is not None
+
+
+def test_invoke_smoke():
+    g = build_graph()
+    result = g.invoke({"query": "hello", "history": []})
+    assert "answer" in result
+    assert result["answer"]

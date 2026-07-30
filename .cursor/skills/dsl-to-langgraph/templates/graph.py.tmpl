@@ -1,0 +1,22 @@
+"""LangGraph workflow for {{PROJECT_NAME}}."""
+
+from __future__ import annotations
+
+from langgraph.graph import END, START, StateGraph
+
+from nodes import answer_node, start_node
+from state import WorkflowState
+
+
+def build_graph():
+    workflow = StateGraph(WorkflowState)
+    workflow.add_node("start_input", start_node)
+    workflow.add_node("answer", answer_node)
+
+    workflow.add_edge(START, "start_input")
+    workflow.add_edge("start_input", "answer")
+    workflow.add_edge("answer", END)
+    return workflow.compile()
+
+
+graph = build_graph()

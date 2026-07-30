@@ -1,0 +1,13 @@
+"""Normalize chat input into workflow state."""
+
+from __future__ import annotations
+
+from state import WorkflowState
+
+
+def start_node(state: WorkflowState) -> dict:
+    query = (state.get("query") or "").strip()
+    if not query:
+        raise ValueError("問題不可為空白")
+    history = state.get("history") or []
+    return {"query": query, "history": history}

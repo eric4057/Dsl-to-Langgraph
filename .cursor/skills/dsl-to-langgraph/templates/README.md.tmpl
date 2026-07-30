@@ -1,0 +1,46 @@
+# {{PROJECT_NAME}}
+
+由 DSL 工作流轉換而來的獨立 **LangGraph** 服務，提供 OpenAI-compatible API。
+
+## 結構
+
+```text
+.
+├── api.py
+├── graph.py
+├── state.py
+├── config.py
+├── nodes/
+├── langgraph.json
+├── requirements.txt
+└── .env.example
+```
+
+## 快速開始
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# 編輯 .env
+
+python api.py
+```
+
+## 呼叫
+
+```bash
+curl http://localhost:{{API_PORT}}/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "{{API_MODEL}}",
+    "messages": [{"role": "user", "content": "你好"}]
+  }'
+```
+
+串流：`"stream": true`，並使用 `curl -N`。
+
+## 來源
+
+請在此註明原始 DSL 檔名與主要節點對映。

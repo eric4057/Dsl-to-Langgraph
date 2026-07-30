@@ -1,5 +1,7 @@
 # DSL → LangGraph 參考
 
+> 由 `SKILL.md` 按需載入。
+
 ## 支援的 DSL
 
 ### 1. Dify（YAML / JSON）

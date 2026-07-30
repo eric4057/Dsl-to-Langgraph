@@ -1,6 +1,6 @@
 # 交付 Checklist
 
-完成 DSL → LangGraph 遷移時逐項確認：
+> 由 `SKILL.md` 按需載入。完成遷移時逐項確認：
 
 ## 解析與設計
 

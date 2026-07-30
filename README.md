@@ -1,74 +1,81 @@
 # dsl-to-langgraph
 
-Cursor Agent Skill：把工作流 DSL 轉成獨立 **LangGraph** 專案（含 OpenAI-compatible API）。
+跨平台 **Agent Skill**：把工作流 DSL 轉成獨立 LangGraph 專案（含 OpenAI-compatible API）。
 
-支援：
+同一套 skill 可用於：
 
-- **Dify** YAML/JSON
-- **LangFlow** / **Flowise** JSON
-- **n8n** JSON
-- **Generic** nodes + edges YAML/JSON
+| 環境 | 用法 |
+|---|---|
+| **Cursor** | `~/.cursor/skills/dsl-to-langgraph` 或開啟本 repo |
+| **OpenClaw** | 放到 `workspace/skills/dsl-to-langgraph`，用 `exec` 跑腳本 |
+| **ChatGPT Custom GPT** | 貼上 `gpt/CUSTOM_GPT_INSTRUCTIONS.md` + 上傳 Knowledge |
+| **Codex / GPT Skills** | 上傳本 skill 資料夾（含 `agents/openai.yaml`） |
+| **純 CLI** | 直接跑 `scripts/parse_dsl.py`、`scripts/scaffold_project.py` |
 
-產出固定包含：`graph.py`、`state.py`、`nodes/`、`api.py`（`/v1/chat/completions`）。
+支援 DSL：Dify、LangFlow、Flowise、n8n、generic nodes+edges。
 
 風格基準：[`nchc_qa_langgraph`](https://github.com/eric4057/nchc_qa_langgraph)、[`gba_langgraph`](https://github.com/eric4057/gba_langgraph)、[`gba_dual_langgraph`](https://github.com/eric4057/gba_dual_langgraph)。
 
-## 安裝到 Cursor
-
-### 方式 A：當專案打開（推薦）
-
-Clone 後用 Cursor 打開本 repo，skill 位於：
+## 結構（Agent Skills 標準）
 
 ```text
-.cursor/skills/dsl-to-langgraph/
+.
+├── SKILL.md                 # 主指示（所有 agent 共用）
+├── agents/openai.yaml       # GPT / Codex UI metadata
+├── scripts/                 # 可攜腳本（相對 SKILL_DIR）
+├── references/              # 按需載入文件
+├── assets/templates/        # scaffold 模板
+├── gpt/CUSTOM_GPT_INSTRUCTIONS.md
+└── README.md
 ```
 
-### 方式 B：個人 skills
+## 安裝
+
+### Cursor
 
 ```bash
+git clone https://github.com/eric4057/dsl-to-langgraph.git
 mkdir -p ~/.cursor/skills
-ln -sfn /path/to/dsl-to-langgraph/.cursor/skills/dsl-to-langgraph \
-  ~/.cursor/skills/dsl-to-langgraph
+ln -sfn "$(pwd)/dsl-to-langgraph" ~/.cursor/skills/dsl-to-langgraph
 ```
 
-之後在對話中提到「DSL 轉 LangGraph」「把 Dify 工作流遷成 LangGraph」等，agent 應載入此 skill。
+或直接用 Cursor 打開本 repo（已含 `.cursor/skills/dsl-to-langgraph` 連結）。
 
-## Skill 內容
-
-```text
-.cursor/skills/dsl-to-langgraph/
-├── SKILL.md           # 主流程
-├── REFERENCE.md       # DSL 辨識與節點對映
-├── EXAMPLES.md        # 既有專案範例
-├── CHECKLIST.md       # 交付驗收
-├── scripts/
-│   ├── parse_dsl.py           # 解析 DSL → inventory
-│   └── scaffold_project.py    # 產生專案骨架
-└── templates/         # scaffold 用模板
-```
-
-## 快速使用
+### OpenClaw
 
 ```bash
-# 1) 解析 DSL
-python3 .cursor/skills/dsl-to-langgraph/scripts/parse_dsl.py your-flow.yml -o inventory.json
-
-# 2) 產生骨架
-python3 .cursor/skills/dsl-to-langgraph/scripts/scaffold_project.py \
-  --name my-app \
-  --out ./my-app \
-  --model-name my-app \
-  --port 8030
+git clone https://github.com/eric4057/dsl-to-langgraph.git
+ln -sfn /absolute/path/to/dsl-to-langgraph \
+  /path/to/.openclaw/workspace/skills/dsl-to-langgraph
 ```
 
-然後依 `SKILL.md` 把 inventory 填進 `nodes/` 與 `graph.py`。
+觸發後用 **`exec`** 執行腳本，不要呼叫名為 `dsl-to-langgraph` 的 tool。
 
-`parse_dsl.py` 需要 `PyYAML`（僅解析 `.yml` 時）：
+### ChatGPT Custom GPT
+
+1. 建立 Custom GPT  
+2. Instructions：貼上 [`gpt/CUSTOM_GPT_INSTRUCTIONS.md`](gpt/CUSTOM_GPT_INSTRUCTIONS.md)  
+3. Knowledge：上傳 `SKILL.md`、`references/`、`assets/templates/`（可打成 zip）
+
+### Codex / OpenAI skill bundle
+
+將整個 repo（或至少 `SKILL.md` + `agents/` + `scripts/` + `references/` + `assets/`）作為 skill 安裝／上傳。`agents/openai.yaml` 提供 UI 顯示名稱與預設提示。
+
+## CLI
 
 ```bash
-pip install pyyaml
+# 解析
+python3 scripts/parse_dsl.py your-flow.yml -o inventory.json
+
+# 骨架（需 PyYAML 僅在解析 yaml 時）
+python3 scripts/scaffold_project.py \
+  --name my-app --out ./my-app --model-name my-app --port 8030
+```
+
+```bash
+pip install pyyaml   # parse .yml 時
 ```
 
 ## 授權
 
-Private skill／內部使用。請勿把 DSL 內的密鑰提交進 git。
+Private／內部使用。請勿提交 DSL 內密鑰。

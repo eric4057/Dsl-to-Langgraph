@@ -8,7 +8,10 @@ import re
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
-TEMPLATES = SKILL_ROOT / "templates"
+# Prefer Agent Skills layout (assets/templates); keep legacy fallback.
+TEMPLATES = SKILL_ROOT / "assets" / "templates"
+if not TEMPLATES.is_dir():
+    TEMPLATES = SKILL_ROOT / "templates"
 
 
 def _slug(name: str) -> str:

@@ -45,8 +45,12 @@ ln -sfn "$(pwd)/dsl-to-langgraph" ~/.cursor/skills/dsl-to-langgraph
 
 ```bash
 git clone https://github.com/eric4057/dsl-to-langgraph.git
+# 常見容器路徑：
 ln -sfn /absolute/path/to/dsl-to-langgraph \
-  /path/to/.openclaw/workspace/skills/dsl-to-langgraph
+  /home/node/.openclaw/workspace/skills/dsl-to-langgraph
+# 或本機 OpenClaw workspace：
+# ln -sfn /absolute/path/to/dsl-to-langgraph \
+#   ~/.openclaw/workspace/skills/dsl-to-langgraph
 ```
 
 觸發後用 **`exec`** 執行腳本，不要呼叫名為 `dsl-to-langgraph` 的 tool。
@@ -64,17 +68,19 @@ ln -sfn /absolute/path/to/dsl-to-langgraph \
 ## CLI
 
 ```bash
-# 解析
+# 解析（YAML 需 PyYAML）
 python3 scripts/parse_dsl.py your-flow.yml -o inventory.json
 
-# 骨架（需 PyYAML 僅在解析 yaml 時）
+# 骨架：中文專案名請一定加 --model-name
 python3 scripts/scaffold_project.py \
-  --name my-app --out ./my-app --model-name my-app --port 8030
+  --name "智慧客服" --out ./my-app --model-name nchc-qa-langgraph --port 8030
 ```
 
 ```bash
 pip install pyyaml   # parse .yml 時
 ```
+
+`parse_dsl.py` 對 RAG 會建議 `order_citations`／`build_context`；inventory 含 prompt／rerank／code 摘要。
 
 ## 授權
 

@@ -91,11 +91,14 @@ python3 "$SKILL_DIR/scripts/parse_dsl.py" <dsl-file> [-o inventory.json]
 
 ```bash
 python3 "$SKILL_DIR/scripts/scaffold_project.py" \
-  --name <project_slug> \
+  --name <project_name> \
   --out <target_dir> \
   --model-name <api_model> \
   --port <port>
 ```
+
+- 中文／非 ASCII 專案名會得到 `app-<hash>` slug；**務必**用 `--model-name` 指定對外模型名。
+- scaffold 的 `nodes/answer.py` 僅是骨架佔位；**交付前必須換成 DSL 真實邏輯**，不可把骨架 TODO／stub 當完成。
 
 無腳本時：複製 `assets/templates/` 並替換 `{{PROJECT_NAME}}`、`{{API_MODEL}}`、`{{API_PORT}}`、`{{PROJECT_SLUG}}`、`{{GRAPH_EXPORT}}`。
 
@@ -114,10 +117,12 @@ python3 "$SKILL_DIR/scripts/scaffold_project.py" \
 當 DSL 含 knowledge-retrieval／來源區塊／citation 時：
 
 1. 相同來源（URL 或檔案路徑）多個 chunk → **共用同一編號**
-2. 文中引用格式：`[[n]](URL)`；編號依**文中第一次出現**從 1 起編，**連續不跳號**
+2. **預設**文中引用格式：`[[n]](URL)`；編號依**文中第一次出現**從 1 起編，**連續不跳號**  
+   （若使用者指定保留原 DSL 公開引用格式，則遵從使用者；否則採用此標準）
 3. `answer` 後處理必須依出現順序重編號；跳號／亂序要改寫成 1..N
 4. 文末 `### 來源` 區塊順序 = 文中引用順序（同一份 1..N 清單）
 5. 未實際用到的來源不要塞進來源區塊；完全沒引用時可 fallback 排序第一筆
+6. 建議節點：`retrieve → order_citations → build_context → answer`（citation 相關 `code` 併入後兩者）
 
 節點對映：[references/REFERENCE.md](references/REFERENCE.md)  
 範例：[references/EXAMPLES.md](references/EXAMPLES.md)

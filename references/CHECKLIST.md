@@ -12,11 +12,13 @@
 ## 專案結構
 
 - [ ] `graph.py` / `state.py` / `nodes/` / `config.py` / `api.py` 齊全
+- [ ]（若有外部呼叫）`services.py` 或等價封裝
 - [ ] `langgraph.json` 指向 `./graph.py:graph`
 - [ ] `requirements.txt` 或 `pyproject.toml`
 - [ ] `.env.example`（無真實密鑰）
 - [ ] `README.md`（流程、啟動、curl）
 - [ ] `.gitignore` 含 `.env`、`.venv`、`__pycache__`
+- [ ] 無骨架 stub／TODO 殘留在交付碼中
 
 ## 行為
 
@@ -28,8 +30,10 @@
 
 ## 引用／參考連結（RAG 時必勾）
 
+- [ ] 節點含 `order_citations`／`build_context`（或等價合併實作）
 - [ ] 相同來源共用同一編號
 - [ ] 文中引用依第一次出現重編為連續 1..N（不跳號）
+- [ ] 預設 `[[n]](URL)`，或已依使用者指定保留原公開格式且順序仍一致
 - [ ] `### 來源` 區塊順序與文中引用順序一致
 - [ ] 未使用來源不出現在來源區塊
 - [ ] 有針對亂序／跳號引用的單元測試（參考 `nchc_qa_langgraph`）

@@ -71,7 +71,7 @@ edges:
 | `knowledge-retrieval` | `retrieve`（Qdrant 等）；多知識庫 → 多 collection 或 `multi` |
 | `variable-aggregator` | 通常刪除；上游寫入同一 state 欄位 |
 | `template-transform` | Jinja/f-string helper，併入下一節點 |
-| `code` | 純函式模組；有副作用則獨立 node |
+| `code` | 若為引用／context 組裝 → 併入 `build_context`／`answer`；其餘才獨立 `transform` |
 | `http-request` / `tool` | `httpx` service + node |
 | `assigner` | 直接在 node 回傳 state 更新 |
 | `loop` / `iteration` | 有限迴圈狀態或一次批次處理 |
@@ -127,13 +127,23 @@ if writer:
 
 1. **來源鍵**：`source_url` 優先，否則 `source_path`／穩定檔名；同一鍵共用一個 id。
 2. **餵給模型前**（可選但建議）：依問題語意對來源分組排序（`order_citations`），讓 1..N 較合理。
-3. **模型輸出格式**：只允許 `[[n]](URL)`（或後處理可辨識的 `[n]`），禁止自創網址列表。
+3. **模型輸出格式（預設）**：`[[n]](URL)`（或後處理可辨識的 `[n]`），禁止自創網址列表。  
+   若使用者明確要求保留原 DSL 對外引用格式，則保留該格式，但仍須滿足「連續編號＋來源順序一致」。
 4. **後處理固定順序**（必做）：
    - 掃描回答中引用「第一次出現」的舊 id 順序
    - 重編為連續 `1..N`
-   - 改寫成可點擊 `[[new]](url)`
+   - 改寫成可點擊連結（預設 `[[new]](url)`）
    - 文末追加 `### 來源`，列序與文中 1..N **完全一致**
 5. **禁止**：跳號、來源區塊與文中順序不一致、把未引用來源塞進列表湊數。
+
+### inventory 會抽出的重點
+
+`parse_dsl.py` 對 Dify 會盡量帶出（勿只依賴 type 名稱）：
+
+- `prompt_excerpt`、`answer_template_excerpt`
+- `dataset_ids`、`retrieval_mode`、rerank 相關 config
+- `code_excerpt` + `code_looks_like_citation`
+- `has_rag` 與建議節點（含 `order_citations`／`build_context`）
 
 ### 建議節點切分
 

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
+import unicodedata
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -15,9 +17,16 @@ if not TEMPLATES.is_dir():
 
 
 def _slug(name: str) -> str:
-    value = name.strip().lower()
-    value = re.sub(r"[^a-z0-9]+", "-", value)
-    return value.strip("-") or "langgraph-app"
+    """Build a filesystem-/API-safe slug; keep CJK via unicode slug + short hash."""
+    value = unicodedata.normalize("NFKC", name.strip())
+    ascii_part = value.lower()
+    ascii_part = re.sub(r"[^a-z0-9]+", "-", ascii_part).strip("-")
+    if ascii_part and re.search(r"[a-z0-9]", ascii_part):
+        return ascii_part[:48].strip("-") or "langgraph-app"
+
+    # Non-ASCII names (e.g. 智慧客服): use stable hash suffix for GRAPH_EXPORT / defaults.
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:8]
+    return f"app-{digest}"
 
 
 def _render(text: str, mapping: dict[str, str]) -> str:
@@ -29,10 +38,11 @@ def _render(text: str, mapping: dict[str, str]) -> str:
 
 def scaffold(out: Path, name: str, model_name: str, port: int) -> None:
     slug = _slug(name)
+    api_model = (model_name or "").strip() or slug
     mapping = {
         "PROJECT_NAME": name,
         "PROJECT_SLUG": slug,
-        "API_MODEL": model_name or slug,
+        "API_MODEL": api_model,
         "API_PORT": str(port),
         "GRAPH_EXPORT": slug.replace("-", "_"),
     }
@@ -62,15 +72,23 @@ def scaffold(out: Path, name: str, model_name: str, port: int) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(_render(src.read_text(encoding="utf-8"), mapping), encoding="utf-8")
     print(f"scaffolded: {out}")
-    print(f"  model={mapping['API_MODEL']} port={mapping['API_PORT']}")
-    print("下一步：依 DSL inventory 實作 nodes/ 與 graph 邊，並填 .env")
+    print(f"  project_name={name!r}")
+    print(f"  slug={mapping['PROJECT_SLUG']} model={mapping['API_MODEL']} port={mapping['API_PORT']}")
+    if not (model_name or "").strip() and mapping["PROJECT_SLUG"].startswith("app-"):
+        print("提示: 專案名無 ASCII，已用 hash slug；建議加 --model-name 指定對外模型名")
+    print("下一步: 依 DSL inventory 實作 nodes/ 與 graph 邊，並填 .env")
+    print("注意: nodes/answer.py 為骨架佔位；交付前必須換成 DSL 真實邏輯（不可留 TODO）")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", required=True, help="專案顯示名稱或 slug")
     parser.add_argument("--out", type=Path, required=True, help="輸出目錄")
-    parser.add_argument("--model-name", default="", help="OpenAI-compatible 模型名")
+    parser.add_argument(
+        "--model-name",
+        default="",
+        help="OpenAI-compatible 模型名（中文專案名強烈建議指定）",
+    )
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     if args.out.exists() and any(args.out.iterdir()):

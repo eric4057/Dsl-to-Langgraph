@@ -61,7 +61,7 @@ START → start_input → check_video
 - `api.py` 支援 `/v1/files` + chat `files[]`
 - LiteLLM 相容：模型名去 `openai/` 前綴
 
-## 例 4：Generic YAML（最小）
+## 例 4：Generic YAML（RAG）
 
 輸入：
 
@@ -76,7 +76,14 @@ edges:
   - {source: retrieve, target: answer}
 ```
 
-預期專案節點：`normalize_input`（可選）→ `retrieve` → `answer`；加上完整 `api.py`。
+預期專案節點（正式 RAG，含固定順序引用）：
+
+```text
+normalize_input → retrieve → order_citations → build_context → answer
+```
+
+- `answer` 需含 `_link_citations` 後處理與 `### 來源`
+- 僅在使用者明確只要最小可跑骨架時，才可暫時 `retrieve → answer`，且 README 必須標「尚未完成引用固定順序」
 
 ## 命名建議
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -50,20 +51,52 @@ def _detect(data: Any) -> str:
     if "connections" in data and "nodes" in data:
         return "n8n"
     if "nodes" in data and ("edges" in data or "links" in data):
-        # Heuristic: LangFlow often nests under data
         sample = data["nodes"][0] if data["nodes"] else {}
         node_data = sample.get("data") if isinstance(sample, dict) else {}
         ntype = ""
         if isinstance(node_data, dict):
             ntype = str(node_data.get("type") or node_data.get("name") or "")
-        if "langflow" in json.dumps(data).lower():
+        blob = json.dumps(data).lower()
+        if "langflow" in blob:
             return "langflow"
-        if "flowise" in json.dumps(data).lower() or "chatPrompt" in ntype:
+        if "flowise" in blob or "chatprompt" in ntype.lower():
             return "flowise"
         return "generic"
     if isinstance(data.get("data"), dict) and "nodes" in data["data"]:
         return "langflow"
     return "unknown"
+
+
+def _truncate(value: Any, limit: int = 800) -> Any:
+    if isinstance(value, str):
+        return value if len(value) <= limit else value[: limit - 1] + "…"
+    if isinstance(value, list):
+        return [_truncate(item, limit) for item in value[:20]]
+    if isinstance(value, dict):
+        return {str(k): _truncate(v, min(limit, 400)) for k, v in list(value.items())[:30]}
+    return value
+
+
+def _prompt_excerpt(prompt_template: Any) -> str | list | dict | None:
+    if prompt_template is None:
+        return None
+    if isinstance(prompt_template, str):
+        return _truncate(prompt_template, 1200)
+    if isinstance(prompt_template, list):
+        parts = []
+        for item in prompt_template:
+            if isinstance(item, dict):
+                role = item.get("role") or item.get("id") or ""
+                text = item.get("text") or item.get("content") or ""
+                if isinstance(text, list):
+                    text = " ".join(str(x) for x in text)
+                parts.append({"role": role, "text": _truncate(str(text), 600)})
+            else:
+                parts.append(_truncate(str(item), 600))
+        return parts
+    if isinstance(prompt_template, dict):
+        return _truncate(prompt_template, 1200)
+    return _truncate(str(prompt_template), 600)
 
 
 def _dify_inventory(data: dict) -> dict[str, Any]:
@@ -110,13 +143,32 @@ def _dify_hints(d: dict) -> dict[str, Any]:
     hints: dict[str, Any] = {}
     if "dataset_ids" in d:
         hints["dataset_ids"] = d.get("dataset_ids")
+    if "dataset_id" in d:
+        hints["dataset_id"] = d.get("dataset_id")
+    if "retrieval_mode" in d:
+        hints["retrieval_mode"] = d.get("retrieval_mode")
+    for key in ("multiple_retrieval_config", "single_retrieval_config"):
+        if key in d and isinstance(d.get(key), dict):
+            cfg = d[key]
+            hints[key] = {
+                "top_k": cfg.get("top_k"),
+                "reranking_enable": cfg.get("reranking_enable"),
+                "reranking_mode": cfg.get("reranking_mode"),
+                "reranking_model": _truncate(cfg.get("reranking_model"), 200),
+                "weights": cfg.get("weights"),
+            }
     if "query_variable_selector" in d:
         hints["query_variable_selector"] = d.get("query_variable_selector")
     if "prompt_template" in d:
         hints["has_prompt"] = True
+        hints["prompt_excerpt"] = _prompt_excerpt(d.get("prompt_template"))
     if "code" in d:
         hints["has_code"] = True
         hints["code_language"] = d.get("code_language")
+        code = d.get("code")
+        if isinstance(code, str):
+            hints["code_excerpt"] = _truncate(code, 1000)
+            hints["code_looks_like_citation"] = _code_looks_like_citation(code)
     if "classes" in d:
         hints["classes"] = [
             c.get("name") or c.get("id") for c in (d.get("classes") or []) if isinstance(c, dict)
@@ -124,8 +176,27 @@ def _dify_hints(d: dict) -> dict[str, Any]:
     if "model" in d:
         model = d.get("model")
         if isinstance(model, dict):
-            hints["model"] = model.get("name") or model.get("completion_params")
+            hints["model"] = model.get("name") or model.get("provider")
+            if model.get("completion_params"):
+                hints["completion_params"] = _truncate(model.get("completion_params"), 300)
+    if d.get("type") == "answer" and d.get("answer"):
+        hints["answer_template_excerpt"] = _truncate(str(d.get("answer")), 600)
     return hints
+
+
+def _code_looks_like_citation(code: str) -> bool:
+    lowered = code.lower()
+    markers = (
+        "citation",
+        "source_url",
+        "### 來源",
+        "[[",
+        "retriever_resource",
+        "document id",
+        "引用",
+        "來源",
+    )
+    return any(marker.lower() in lowered if marker.isascii() else marker in code for marker in markers)
 
 
 def _generic_inventory(data: dict, source: str) -> dict[str, Any]:
@@ -146,12 +217,16 @@ def _generic_inventory(data: dict, source: str) -> dict[str, Any]:
             or "unknown"
         )
         title = d.get("title") or d.get("label") or node.get("name") or str(ntype)
+        hints: dict[str, Any] = {}
+        for key in ("template", "prompt", "system_message", "input_value"):
+            if key in d:
+                hints[key] = _truncate(d.get(key), 600)
         nodes.append(
             {
                 "id": str(node.get("id", "")),
                 "type": ntype,
                 "title": title,
-                "hints": {},
+                "hints": hints,
             }
         )
     edges = []
@@ -179,13 +254,24 @@ def _generic_inventory(data: dict, source: str) -> dict[str, Any]:
 
 def _n8n_inventory(data: dict) -> dict[str, Any]:
     nodes = []
+    name_to_id: dict[str, str] = {}
     for node in data.get("nodes") or []:
+        node_id = str(node.get("id") or node.get("name") or "")
+        name = str(node.get("name") or "")
+        if name:
+            name_to_id[name] = node_id
+        if node_id:
+            name_to_id.setdefault(node_id, node_id)
         nodes.append(
             {
-                "id": str(node.get("id") or node.get("name") or ""),
+                "id": node_id,
                 "type": node.get("type"),
-                "title": node.get("name") or "",
-                "hints": {"parameters": bool(node.get("parameters"))},
+                "title": name,
+                "hints": {
+                    "parameters": _truncate(node.get("parameters"), 800)
+                    if node.get("parameters")
+                    else None
+                },
             }
         )
     edges = []
@@ -193,6 +279,7 @@ def _n8n_inventory(data: dict) -> dict[str, Any]:
     for src_name, outputs in connections.items():
         if not isinstance(outputs, dict):
             continue
+        source_id = name_to_id.get(str(src_name), str(src_name))
         for _out_name, chains in outputs.items():
             if not isinstance(chains, list):
                 continue
@@ -202,14 +289,16 @@ def _n8n_inventory(data: dict) -> dict[str, Any]:
                 for link in chain:
                     if not isinstance(link, dict):
                         continue
+                    target_name = str(link.get("node", ""))
                     edges.append(
                         {
-                            "source": str(src_name),
-                            "target": str(link.get("node", "")),
+                            "source": source_id,
+                            "target": name_to_id.get(target_name, target_name),
                             "source_handle": link.get("type"),
+                            "source_name": str(src_name),
+                            "target_name": target_name,
                         }
                     )
-    # n8n edges often use names; map name→id when possible
     return {
         "source": "n8n",
         "name": data.get("name") or "",
@@ -228,13 +317,26 @@ def _collect_external_hints(nodes: list[dict[str, Any]]) -> list[str]:
         title = str(node.get("title") or "")
         if "knowledge" in t or "retriev" in t or "vector" in t:
             hints.append(f"vector/kb:{title or t}")
-        if "http" in t or "webhook" in t or "request" in t:
+        if "http" in t or "webhook" in t or t.endswith("request") or "httprequest" in t:
             hints.append(f"http:{title or t}")
-        if t in {"tool", "agent"} or "tool" in t:
+        if t in {"tool", "agent"} or t.endswith(".tool") or t.startswith("n8n-nodes-base.tool"):
             hints.append(f"tool/agent:{title or t}")
-        if "llm" in t or "openai" in t or "chat" in t:
+        elif "agent" in t:
+            hints.append(f"tool/agent:{title or t}")
+        # Avoid over-matching bare "chat" in arbitrary type strings.
+        if t in {"llm", "openai", "chat"} or t.endswith(".llm") or "llmgateway" in t:
             hints.append(f"llm:{title or t}")
-    # unique preserve order
+        elif "openai" in t or re.search(r"(^|[.-])llm([.-]|$)", t):
+            hints.append(f"llm:{title or t}")
+        node_hints = node.get("hints") or {}
+        if node_hints.get("reranking_enable") or (
+            isinstance(node_hints.get("multiple_retrieval_config"), dict)
+            and node_hints["multiple_retrieval_config"].get("reranking_enable")
+        ):
+            hints.append(f"rerank:{title or t}")
+        cfg = node_hints.get("multiple_retrieval_config") or node_hints.get("single_retrieval_config")
+        if isinstance(cfg, dict) and cfg.get("reranking_enable"):
+            hints.append(f"rerank:{title or t}")
     seen: set[str] = set()
     out: list[str] = []
     for h in hints:
@@ -254,7 +356,6 @@ def parse(path: Path) -> dict[str, Any]:
     elif source in {"generic", "langflow", "flowise"}:
         inv = _generic_inventory(data, source)
     else:
-        # last resort: try nested data or generic
         if isinstance(data, dict) and isinstance(data.get("data"), dict):
             inv = _generic_inventory(data, "langflow")
         elif isinstance(data, dict) and "nodes" in data:
@@ -270,13 +371,27 @@ def parse(path: Path) -> dict[str, Any]:
                 "error": "無法辨識 DSL 結構",
             }
     inv["file"] = str(path)
+    inv["has_rag"] = _has_rag(inv)
     inv["suggested_langgraph_nodes"] = _suggest_nodes(inv)
     return inv
+
+
+def _has_rag(inv: dict[str, Any]) -> bool:
+    counts = inv.get("type_counts") or {}
+    for key in counts:
+        lowered = str(key).lower()
+        if any(token in lowered for token in ("knowledge", "retriev", "vector", "dataset")):
+            return True
+    for hint in inv.get("external_hints") or []:
+        if str(hint).startswith("vector/kb:"):
+            return True
+    return False
 
 
 def _suggest_nodes(inv: dict[str, Any]) -> list[str]:
     """Suggest consolidated LangGraph node names from type counts."""
     counts: dict[str, int] = inv.get("type_counts") or {}
+    nodes = inv.get("nodes") or []
     suggested: list[str] = ["normalize_input"]
     # Explicit None => merge into neighbors / ignore (glue or notes).
     mapping: dict[str, str | None] = {
@@ -286,7 +401,6 @@ def _suggest_nodes(inv: dict[str, Any]) -> list[str]:
         "llm": "llm_answer",
         "answer": "answer",
         "http-request": "http_call",
-        "code": "transform",
         "agent": "agent",
         "document-extractor": "extract",
         "loop": "loop_body",
@@ -298,10 +412,20 @@ def _suggest_nodes(inv: dict[str, Any]) -> list[str]:
         "start": None,
         "loop-start": None,
         "loop-end": None,
+        # code handled separately
+        "code": None,
     }
     seen: set[str] = set()
+
+    def _add(name: str) -> None:
+        if name not in seen:
+            seen.add(name)
+            suggested.append(name)
+
     for dtype, _count in counts.items():
         key = str(dtype)
+        if key == "code":
+            continue
         if key in mapping:
             name = mapping[key]
             if name is None:
@@ -310,12 +434,27 @@ def _suggest_nodes(inv: dict[str, Any]) -> list[str]:
             name = key.replace("-", "_").replace(" ", "_").lower()
             if name in {"unknown", ""}:
                 continue
-        if name not in seen:
-            seen.add(name)
-            suggested.append(name)
+        _add(name)
+
+    # Dify code: citation/context glue → merge; other code → transform
+    code_nodes = [n for n in nodes if str(n.get("type")) == "code"]
+    if code_nodes:
+        if any((n.get("hints") or {}).get("code_looks_like_citation") for n in code_nodes):
+            if inv.get("has_rag"):
+                _add("order_citations")
+                _add("build_context")
+            else:
+                _add("build_context")
+        if any(not (n.get("hints") or {}).get("code_looks_like_citation") for n in code_nodes):
+            _add("transform")
+
+    if inv.get("has_rag"):
+        _add("retrieve")
+        _add("order_citations")
+        _add("build_context")
+
     if "answer" not in seen:
-        suggested.append("answer")
-        seen.add("answer")
+        _add("answer")
     return suggested
 
 
@@ -326,6 +465,7 @@ def _print_summary(inv: dict[str, Any]) -> None:
         print(f"mode:   {inv.get('mode')}")
     print(f"nodes:  {len(inv.get('nodes') or [])}")
     print(f"edges:  {len(inv.get('edges') or [])}")
+    print(f"has_rag:{inv.get('has_rag')}")
     print("type_counts:")
     for key, val in sorted((inv.get("type_counts") or {}).items(), key=lambda x: (-x[1], str(x[0]))):
         print(f"  {key}: {val}")

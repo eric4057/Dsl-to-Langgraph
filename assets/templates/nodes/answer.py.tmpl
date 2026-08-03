@@ -1,4 +1,8 @@
-"""Produce the final answer (replace with DSL LLM / RAG logic)."""
+"""Produce the final answer.
+
+SKELETON ONLY: replace this placeholder with real DSL LLM / RAG / tool logic
+before delivery. Do not ship with this stub.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +13,7 @@ from state import WorkflowState
 
 def answer_node(state: WorkflowState) -> dict:
     query = state.get("query") or ""
-    # TODO: 以 DSL 中的 LLM / RAG / 工具邏輯取代此佔位實作
+    # SKELETON: replace with DSL answer logic (and citation post-process if RAG).
     text = f"已收到：{query}"
     writer = get_stream_writer()
     if writer:

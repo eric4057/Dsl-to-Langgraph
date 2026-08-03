@@ -118,6 +118,39 @@ if writer:
 
 `api.py` 只轉發 `type == "answer_delta"` 的 content 成 SSE `delta.content`。
 
+## 引用／參考連結固定順序
+
+適用：DSL 有知識檢索、retriever resource、citation、或「來源」區塊時。  
+基準實作：`nchc_qa_langgraph` 的 `order_citations` → `build_context` → `answer` 後處理。
+
+### 規則
+
+1. **來源鍵**：`source_url` 優先，否則 `source_path`／穩定檔名；同一鍵共用一個 id。
+2. **餵給模型前**（可選但建議）：依問題語意對來源分組排序（`order_citations`），讓 1..N 較合理。
+3. **模型輸出格式**：只允許 `[[n]](URL)`（或後處理可辨識的 `[n]`），禁止自創網址列表。
+4. **後處理固定順序**（必做）：
+   - 掃描回答中引用「第一次出現」的舊 id 順序
+   - 重編為連續 `1..N`
+   - 改寫成可點擊 `[[new]](url)`
+   - 文末追加 `### 來源`，列序與文中 1..N **完全一致**
+5. **禁止**：跳號、來源區塊與文中順序不一致、把未引用來源塞進列表湊數。
+
+### 建議節點切分
+
+```text
+retrieve → order_citations → build_context → answer(_link_citations)
+```
+
+- `build_context`：組 `<document id="n">` 與 `citation_map`
+- `answer`：串流正文；結束後跑 `_link_citations` 再補來源區塊（串流可先送正文、後送來源）
+
+### 驗收例子
+
+| 模型原始輸出 | 使用者應看到 |
+|---|---|
+| `先說 [[4]]，再說 [[2]]` | `先說 [[1]](url4)，再說 [[2]](url2)`，來源區塊亦為 1→2 |
+| 有引用 1、2、缺 3 | 重編後僅連續用到的編號；來源區塊不含未使用項 |
+
 ## 安全
 
 - DSL 可能含 API key／dataset 憑證：寫入 `.env.example` 佔位，**不要**提交真實值

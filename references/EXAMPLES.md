@@ -20,6 +20,7 @@ START → normalize_input → rewrite_query → classify
 
 - 多個 knowledge-retrieval + aggregator → 單一 `retrieve`（依 platform 選 collection／`multi`）
 - 引用編號邏輯從 code/template 收斂到 `context.py` + `answer.py`
+- **參考連結固定順序**：文中第一次出現 → 連續 1..N；`### 來源` 與文中同序；後處理矯正跳號
 - 固定匯款／超出範圍 → `fixed_answer`，不走檢索
 
 **API**：`:8020`，`API_MODEL=nchc-qa-langgraph`

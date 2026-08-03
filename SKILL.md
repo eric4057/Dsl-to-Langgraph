@@ -107,6 +107,17 @@ python3 "$SKILL_DIR/scripts/scaffold_project.py" \
 - 可選 Bearer `API_AUTH_KEY`；模型名容忍 `openai/<name>`
 - 有檔案需求時加 `/v1/files`（參考 `gba_dual_langgraph`）
 - 使用者可見文案預設繁中
+- **有引用／參考連結的 RAG**：必須採固定順序（見下方與 [references/REFERENCE.md](references/REFERENCE.md)）
+
+#### RAG 引用／參考連結（固定順序，必做）
+
+當 DSL 含 knowledge-retrieval／來源區塊／citation 時：
+
+1. 相同來源（URL 或檔案路徑）多個 chunk → **共用同一編號**
+2. 文中引用格式：`[[n]](URL)`；編號依**文中第一次出現**從 1 起編，**連續不跳號**
+3. `answer` 後處理必須依出現順序重編號；跳號／亂序要改寫成 1..N
+4. 文末 `### 來源` 區塊順序 = 文中引用順序（同一份 1..N 清單）
+5. 未實際用到的來源不要塞進來源區塊；完全沒引用時可 fallback 排序第一筆
 
 節點對映：[references/REFERENCE.md](references/REFERENCE.md)  
 範例：[references/EXAMPLES.md](references/EXAMPLES.md)

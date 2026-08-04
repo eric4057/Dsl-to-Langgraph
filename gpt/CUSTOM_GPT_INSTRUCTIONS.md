@@ -25,6 +25,7 @@ requirements.txt, .env.example, README.md, tests/
 6. 先輸出流程圖（mermaid），再輸出完整檔案內容。
 7. 不要留下未實作的 TODO／骨架 stub 當成完成。
 8. 對照 checklist：結構齊全、API 三路由、主要分支對齊、無密鑰外洩。
+9. 若使用者給的是大 DSL：先想像已跑過 `slim_dsl.py`（去掉 position／selected／tool schemas），或要求先瘦身再轉換。
 
 ## RAG 引用／參考連結（有知識檢索時必做）
 

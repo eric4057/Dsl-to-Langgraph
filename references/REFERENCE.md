@@ -17,6 +17,8 @@
 - 節點：`id`、`data.type`、`data.title`、`data` 內 prompt／dataset／code
 - 邊：`source`、`target`、`sourceHandle`（分類／if-else 分支鍵）
 
+大檔請先跑 `scripts/slim_dsl.py`：去掉 `position`／`selected`／viewport／icon／tool `schemas` 等 UI 雜訊，再 parse／交給模型。
+
 ### 2. LangFlow（JSON）
 
 特徵：`data.nodes` / `data.edges`，或頂層 `nodes`/`edges`；component 常有 `data.type` / `data.node.template`。

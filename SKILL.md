@@ -47,6 +47,7 @@ Agent-agnostic skill（Cursor / OpenClaw / GPT / Codex / 任何能讀 SKILL.md �
 
 ```text
 Progress:
+- [ ] 0. （建議）預處理瘦身大 DSL
 - [ ] 1. 辨識 DSL 並解析圖
 - [ ] 2. 畫出目標 LangGraph 拓撲
 - [ ] 3. 定義 WorkflowState
@@ -57,12 +58,27 @@ Progress:
 - [ ] 8. 對照 checklist 驗收
 ```
 
+### 0. 預處理瘦身（大 DSL／Discord／長 context 建議）
+
+貼進 agent 前先刪 UI／佈局／密鑰雜訊，只留轉換必要欄位：
+
+```bash
+python3 "$SKILL_DIR/scripts/slim_dsl.py" <dsl-file> [-o <dsl.slim.yml>]
+```
+
+- 會去掉：`position`／`selected`／`viewport`／icon／`paramSchemas` 等
+- 會保留：nodes／edges、type／title、prompt／code／HTTP／KB／分支條件、模型名
+- 明顯密鑰改成 `{{REDACTED}}`
+- 產出可再交給 `parse_dsl.py`（結構仍可辨識）
+
 ### 1. 辨識與解析
 
 有執行環境時：
 
 ```bash
-python3 "$SKILL_DIR/scripts/parse_dsl.py" <dsl-file> [-o inventory.json]
+# 大檔建議先 slim 再 parse
+python3 "$SKILL_DIR/scripts/slim_dsl.py" <dsl-file> -o /tmp/flow.slim.yml
+python3 "$SKILL_DIR/scripts/parse_dsl.py" /tmp/flow.slim.yml [-o inventory.json]
 ```
 
 無執行環境：讀 DSL，依訊號判斷來源（詳見 [references/REFERENCE.md](references/REFERENCE.md)）：

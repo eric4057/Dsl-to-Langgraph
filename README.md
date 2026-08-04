@@ -10,7 +10,7 @@
 | **OpenClaw** | 放到 `workspace/skills/dsl-to-langgraph`，用 `exec` 跑腳本 |
 | **ChatGPT Custom GPT** | 貼上 `gpt/CUSTOM_GPT_INSTRUCTIONS.md` + 上傳 Knowledge |
 | **Codex / GPT Skills** | 上傳本 skill 資料夾（含 `agents/openai.yaml`） |
-| **純 CLI** | 直接跑 `scripts/parse_dsl.py`、`scripts/scaffold_project.py` |
+| **純 CLI** | 直接跑 `scripts/slim_dsl.py`、`scripts/parse_dsl.py`、`scripts/scaffold_project.py` |
 
 支援 DSL：Dify、LangFlow、Flowise、n8n、generic nodes+edges。
 
@@ -68,10 +68,13 @@ ln -sfn /absolute/path/to/dsl-to-langgraph \
 ## CLI
 
 ```bash
-# 解析（YAML 需 PyYAML）
-python3 scripts/parse_dsl.py your-flow.yml -o inventory.json
+# 0) 大 DSL 先瘦身（建議；Discord／長 context 必做）
+python3 scripts/slim_dsl.py your-flow.yml -o /tmp/your-flow.slim.yml
 
-# 骨架：中文專案名請一定加 --model-name
+# 1) 解析（YAML 需 PyYAML）
+python3 scripts/parse_dsl.py /tmp/your-flow.slim.yml -o inventory.json
+
+# 2) 骨架：中文專案名請一定加 --model-name
 python3 scripts/scaffold_project.py \
   --name "智慧客服" --out ./my-app --model-name nchc-qa-langgraph --port 8030
 ```

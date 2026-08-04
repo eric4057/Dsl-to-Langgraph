@@ -14,7 +14,6 @@
 
 支援 DSL：Dify、LangFlow、Flowise、n8n、generic nodes+edges。
 
-風格基準：[`nchc_qa_langgraph`](https://github.com/eric4057/nchc_qa_langgraph)、[`gba_langgraph`](https://github.com/eric4057/gba_langgraph)、[`gba_dual_langgraph`](https://github.com/eric4057/gba_dual_langgraph)。
 
 ## 結構（Agent Skills 標準）
 

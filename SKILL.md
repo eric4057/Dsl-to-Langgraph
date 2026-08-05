@@ -113,6 +113,7 @@ python3 "$SKILL_DIR/scripts/scaffold_project.py" \
   --port <port>
 ```
 
+- `--port` **可自訂**（寫入 `API_PORT`）；省略則預設 `8000`。產出後也可在 `.env` 改 `API_PORT`。
 - 中文／非 ASCII 專案名會得到 `app-<hash>` slug；**務必**用 `--model-name` 指定對外模型名。
 - scaffold 的 `nodes/answer.py` 僅是骨架佔位；**交付前必須換成 DSL 真實邏輯**，不可把骨架 TODO／stub 當完成。
 

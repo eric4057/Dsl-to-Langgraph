@@ -16,7 +16,7 @@
 
 ### `scripts/slim_dsl.py`
 
-處理過大的 DSL 匯出（例如數千行 Dify YAML），降低塞入 agent／Discord 時的 context 壓力。
+處理過大的 DSL 匯出（例如數千行 Dify YAML），降低塞入 agent時的 context 壓力。
 
 - **移除：** 畫布資訊（`position`、`selected`、`viewport` 等）、icon、tool `paramSchemas`，以及其他非語意 UI 欄位  
 - **保留：** 圖拓撲、節點 `type`／`title`、prompt、code、HTTP／KB 設定、分支條件、模型識別  
@@ -53,6 +53,19 @@ python3 scripts/scaffold_project.py \
 ```
 
 骨架中的 `nodes/answer.py` 僅為佔位實作；交付前須改寫為 DSL 對應邏輯。
+
+## OpenAI-compatible API（LangGraph 對外介面）
+
+遷移／scaffold 產出的專案會包含 [`assets/templates/api.py.tmpl`](assets/templates/api.py.tmpl) → `api.py`：  
+**內部跑 LangGraph**（`graph.invoke`／`graph.astream`），**對外提供 OpenAI Chat Completions 格式**，供 curl、Open WebUI、LiteLLM 等直接呼叫。
+
+| 路由 | 說明 |
+|---|---|
+| `POST /v1/chat/completions` | 問答；`stream: true` 時以 SSE 回傳 delta |
+| `GET /v1/models` | 回傳 `API_MODEL` |
+| `GET /health` | 健康檢查 |
+
+這不是把「既有 LangGraph Server API」自動轉成 OpenAI 的獨立轉接器，而是產出專案時**內建**這層包裝（LangGraph 在內、OpenAI 格式在外）。完整遷移時 `SKILL.md` 要求必須保留此 API。
 
 ## CLI 完整流程
 

@@ -52,6 +52,15 @@ python3 scripts/scaffold_project.py \
   --port 8030
 ```
 
+| 參數 | 必填 | 說明 |
+|---|---|---|
+| `--name` | 是 | 專案顯示名稱 |
+| `--out` | 是 | 輸出目錄（須為空或不存在） |
+| `--model-name` | 否 | 對外 `API_MODEL`；中文名強烈建議指定 |
+| `--port` | 否 | **可自訂**；寫入骨架的 `API_PORT`。不傳時預設 **8000**（上例 `8030` 僅為示範） |
+
+產出後也可在專案 `.env` 用 `API_PORT=` 隨時改埠，不必重跑 scaffold。
+
 骨架中的 `nodes/answer.py` 僅為佔位實作；交付前須改寫為 DSL 對應邏輯。
 
 ## OpenAI-compatible API（LangGraph 對外介面）
@@ -78,6 +87,7 @@ python3 scripts/slim_dsl.py your-flow.yml -o /tmp/your-flow.slim.yml
 python3 scripts/parse_dsl.py /tmp/your-flow.slim.yml -o /tmp/inventory.json
 python3 scripts/scaffold_project.py \
   --name "my-app" --out ./my-app --model-name my-app --port 8030
+  # --port 可改成任意可用埠；省略則預設 8000
 ```
 
 接著依 [`SKILL.md`](SKILL.md)，以 inventory 為依據實作真實節點（語意等價遷移，而非逐一搬運所有 glue 節點）。

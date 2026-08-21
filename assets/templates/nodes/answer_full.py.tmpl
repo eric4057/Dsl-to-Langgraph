@@ -1,0 +1,53 @@
+"""節點：寫入最終答案（可選串流）— 契約／DEBUG 範本
+
+DSL: answer / {{DSL_TITLE}}
+DSL_ID: {{DSL_ID}}
+讀取: final_answer, direct_answer, answer
+寫入: answer
+"""
+
+from __future__ import annotations
+
+from langgraph.config import get_stream_writer
+
+from node_debug import NodeDebug
+from state import WorkflowState
+
+# --- META（DEBUG 定位；遷移時填 DSL 真實值）---
+NODE_KEY = "answer"
+DSL_TYPE = "answer"
+DSL_TITLE = "{{DSL_TITLE}}"
+DSL_ID = "{{DSL_ID}}"
+READS = ("final_answer", "direct_answer", "answer")
+WRITES = ("answer",)
+
+
+def answer_node(state: WorkflowState) -> dict:
+    dbg = NodeDebug(NODE_KEY, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
+    try:
+        # --- READ ---
+        text = (
+            state.get("final_answer")
+            or state.get("direct_answer")
+            or state.get("answer")
+            or ""
+        )
+        text = str(text).strip()
+        if not text:
+            text = "無法產生回答，請稍後再試。"
+
+        # --- POST（DSL 有引用工項時：先重編號／組 ### 來源）---
+        # text = link_citations(text, state.get("citation_map") or {})
+
+        # --- STREAM ---
+        try:
+            writer = get_stream_writer()
+            if writer is not None:
+                writer({"type": "answer_delta", "content": text})
+        except Exception:
+            pass
+
+        # --- WRITE ---
+        return dbg.ok({"answer": text})
+    except Exception as exc:
+        return dbg.fail(exc, fallback={"answer": "回答產生失敗，請稍後再試。"})

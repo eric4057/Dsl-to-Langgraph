@@ -83,7 +83,8 @@ normalize_input → retrieve → order_citations → build_context → answer
 ```
 
 - `answer` 需含 `_link_citations` 後處理與 `### 來源`
-- 僅在使用者明確只要最小可跑骨架時，才可暫時 `retrieve → answer`，且 README 必須標「尚未完成引用固定順序」
+- 若 DSL 僅有檢索、無引用／來源工項 → `retrieve → answer` 即可，不必加 citation 鏈
+- 若 DSL 有引用工項但尚未遷移完 → README 必須標「尚未完成引用固定順序」
 
 ## 命名建議
 

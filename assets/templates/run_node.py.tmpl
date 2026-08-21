@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""單節點 DEBUG CLI：不跑整圖，直接呼叫某個 *_node。
+
+用法：
+  python run_node.py normalize_input --query "測試問題"
+  python run_node.py retrieve --query "TWCC 如何開機" --json
+  python run_node.py answer --state-json '{"direct_answer":"你好"}'
+
+環境：
+  DEBUG_NODES=true  印固定格式 IN/OUT/ERR
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import sys
+from typing import Any, Callable
+
+
+def _load_node(name: str) -> Callable[[dict], dict]:
+    # 依專案 nodes 匯出調整；亦可 nodes.<module>.<func>
+    import nodes as nodes_mod
+
+    candidates = [
+        f"{name}_node",
+        name if name.endswith("_node") else None,
+        f"route_{name}",
+    ]
+    for attr in candidates:
+        if not attr:
+            continue
+        fn = getattr(nodes_mod, attr, None)
+        if callable(fn):
+            return fn
+    raise SystemExit(
+        f"找不到節點函式：tried {candidates}；請確認 nodes/__init__.py 有匯出"
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="單節點 DEBUG")
+    parser.add_argument("node", help="節點名（如 normalize_input / answer / retrieve）")
+    parser.add_argument("--query", default="", help="寫入 state.query")
+    parser.add_argument("--state-json", default="", help="完整初始 state JSON")
+    parser.add_argument("--json", action="store_true", help="只輸出 JSON result")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+
+    state: dict[str, Any] = {}
+    if args.state_json:
+        state = json.loads(args.state_json)
+    if args.query:
+        state["query"] = args.query
+    if "trace" not in state:
+        state["trace"] = []
+
+    fn = _load_node(args.node)
+    result = fn(state)
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return
+
+    print("=== RESULT KEYS ===")
+    print(sorted(result.keys()))
+    print("=== TRACE (this node) ===")
+    print(json.dumps(result.get("trace"), ensure_ascii=False, indent=2, default=str))
+    print("=== RESULT (no trace) ===")
+    slim = {k: v for k, v in result.items() if k != "trace"}
+    print(json.dumps(slim, ensure_ascii=False, indent=2, default=str)[:4000])
+
+
+if __name__ == "__main__":
+    main()

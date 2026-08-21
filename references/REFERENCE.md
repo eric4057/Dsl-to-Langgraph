@@ -63,6 +63,10 @@ edges:
 
 ## Dify 節點 → LangGraph
 
+本 skill **以 Dify 為主軸**。解析後請先看 inventory 的 `dify_node_mapping` 與 `dify_branch_edges`。  
+**固定結構（檔名、docstring、讀寫欄位、模板）以 [NODE_CONTRACT.md](NODE_CONTRACT.md) 為準。**  
+下表為語意對映摘要：
+
 | Dify `data.type` | LangGraph 作法 |
 |---|---|
 | `start` | API 組初始 state；可選 `normalize_input` 節點 |
@@ -70,7 +74,7 @@ edges:
 | `llm` | LLM 節點；prompt 從 DSL 抽出 |
 | `question-classifier` | 分類節點 + `add_conditional_edges` |
 | `if-else` | 條件函式 + conditional edges |
-| `knowledge-retrieval` | `retrieve`（Qdrant 等）；多知識庫 → 多 collection 或 `multi` |
+| `knowledge-retrieval` | `retrieve` + **pgvector**；多知識庫 → 多 `collection` |
 | `variable-aggregator` | 通常刪除；上游寫入同一 state 欄位 |
 | `template-transform` | Jinja/f-string helper，併入下一節點 |
 | `code` | 若為引用／context 組裝 → 併入 `build_context`／`answer`；其餘才獨立 `transform` |
@@ -102,7 +106,7 @@ edges:
 | `state.py` | `WorkflowState` 與共用 TypedDict |
 | `nodes/*.py` | 單一節點邏輯 |
 | `config.py` | 環境變數 |
-| `services.py` | 共用客戶端（LLM、Qdrant、HTTP） |
+| `services.py` | 共用客戶端（LLM、HTTP、pgvector `search_knowledge`） |
 | `api.py` | OpenAI-compatible HTTP |
 | `langgraph.json` | `langgraph dev` 入口 |
 
@@ -122,16 +126,17 @@ if writer:
 
 ## 引用／參考連結固定順序
 
-適用：DSL 有知識檢索、retriever resource、citation、或「來源」區塊時。  
+**適用：** 僅當 DSL 含引用／來源組裝工項（citation／「來源」區塊／相關 code／template／文中引用格式）時套用。  
+僅有 `knowledge-retrieval`、無上述工項 → 不做本節。DSL 無此能力 → 略過。  
+（與其他功能相同：**只依 DSL 工項／節點判斷是否實作。**）  
 基準實作：`nchc_qa_langgraph` 的 `order_citations` → `build_context` → `answer` 後處理。
 
 ### 規則
 
 1. **來源鍵**：`source_url` 優先，否則 `source_path`／穩定檔名；同一鍵共用一個 id。
 2. **餵給模型前**（可選但建議）：依問題語意對來源分組排序（`order_citations`），讓 1..N 較合理。
-3. **模型輸出格式（預設）**：`[[n]](URL)`（或後處理可辨識的 `[n]`），禁止自創網址列表。  
-   若使用者明確要求保留原 DSL 對外引用格式，則保留該格式，但仍須滿足「連續編號＋來源順序一致」。
-4. **後處理固定順序**（必做）：
+3. **模型輸出格式**：優先保留 DSL 既有公開引用格式；若 DSL 無明確格式則預設 `[[n]](URL)`（或後處理可辨識的 `[n]`），禁止自創網址列表。仍須「連續編號＋來源順序一致」。
+4. **後處理固定順序**（本節已觸發時必做）：
    - 掃描回答中引用「第一次出現」的舊 id 順序
    - 重編為連續 `1..N`
    - 改寫成可點擊連結（預設 `[[new]](url)`）
@@ -144,8 +149,9 @@ if writer:
 
 - `prompt_excerpt`、`answer_template_excerpt`
 - `dataset_ids`、`retrieval_mode`、rerank 相關 config
-- `code_excerpt` + `code_looks_like_citation`
-- `has_rag` 與建議節點（含 `order_citations`／`build_context`）
+- `code_excerpt` + `code_looks_like_citation`（另有 template／answer／prompt 的 `*_looks_like_citation`）
+- `has_rag`：有 KB／retrieve → 建議 `retrieve`
+- `has_citation`：偵測到引用／來源工項 → 才建議 `order_citations`／`build_context`
 
 ### 建議節點切分
 

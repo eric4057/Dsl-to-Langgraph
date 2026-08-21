@@ -1,0 +1,29 @@
+"""節點：迭代／批次（有上限；避免無限迴圈）
+
+DSL: iteration|loop / {{DSL_TITLE}}
+讀取: {{LIST_FIELD}}
+寫入: {{ACCUM_FIELD}}
+"""
+
+from __future__ import annotations
+
+from services import {{ITEM_SERVICE}}
+from state import WorkflowState
+
+_MAX_ITEMS = {{MAX_ITEMS}}  # 對齊 DSL 或安全上限
+
+
+def {{FUNC_NAME}}_node(state: WorkflowState) -> dict:
+    items = state.get("{{LIST_FIELD}}") or []
+    if not isinstance(items, list):
+        items = []
+    items = items[:_MAX_ITEMS]
+
+    results = []
+    for item in items:
+        try:
+            results.append({{ITEM_SERVICE}}(item))
+        except Exception as exc:
+            results.append({"error": str(exc), "item": item})
+
+    return {"{{ACCUM_FIELD}}": results}

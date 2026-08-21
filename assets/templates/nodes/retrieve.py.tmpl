@@ -1,0 +1,44 @@
+"""節點：知識庫檢索
+
+DSL: knowledge-retrieval / {{DSL_TITLE}}
+DSL_ID: {{DSL_ID}}
+讀取: retrieval_query, query
+寫入: documents
+"""
+
+from __future__ import annotations
+
+from node_debug import NodeDebug
+from services import search_knowledge
+from state import WorkflowState
+
+# --- META（DEBUG 定位；遷移時填 DSL 真實值）---
+NODE_KEY = "retrieve"
+DSL_TYPE = "knowledge-retrieval"
+DSL_TITLE = "{{DSL_TITLE}}"
+DSL_ID = "{{DSL_ID}}"
+READS = ("retrieval_query", "query", "platform")
+WRITES = ("documents",)
+
+
+def retrieve_node(state: WorkflowState) -> dict:
+    dbg = NodeDebug(NODE_KEY, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
+    try:
+        # --- READ ---
+        q = (state.get("retrieval_query") or state.get("query") or "").strip()
+        if not q:
+            return dbg.ok({"documents": []})
+
+        # --- CALL（pgvector；多知識庫用 collection=平台名或 dataset 短名）---
+        collection = state.get("platform") or state.get("rag_collection")
+        docs = search_knowledge(q, collection=collection if collection else None) or []
+        # 正規化：list[{content, score, metadata: {url|path, title, source_key, ...}}]
+
+        # --- WRITE ---
+        return dbg.ok({"documents": docs})
+    except Exception as exc:
+        return dbg.fail(
+            exc,
+            fallback={"documents": []},
+            error_field="retrieve_error",
+        )

@@ -1,0 +1,43 @@
+"""路由：條件分支（無 I/O）
+
+DSL: if-else / {{DSL_TITLE}}
+DSL_ID: {{DSL_ID}}
+讀取: {{CONDITION_FIELDS}}
+回傳: 邊標籤字串（對齊 graph.add_conditional_edges mapping）
+"""
+
+from __future__ import annotations
+
+from node_debug import log_route
+from state import WorkflowState
+
+# --- META（DEBUG 定位；遷移時填 DSL 真實值）---
+ROUTE_NAME = "{{ROUTE_NAME}}"
+DSL_TYPE = "if-else"
+DSL_TITLE = "{{DSL_TITLE}}"
+DSL_ID = "{{DSL_ID}}"
+READS = ("{{CONDITION_FIELD}}",)
+# 標籤必須與 graph mapping 完全一致
+TRUE_LABEL = "{{TRUE_LABEL}}"
+FALSE_LABEL = "{{FALSE_LABEL}}"
+
+
+def route_{{ROUTE_NAME}}(state: WorkflowState) -> str:
+    # --- READ ---
+    value = state.get("{{CONDITION_FIELD}}")
+    condition = {"{{CONDITION_FIELD}}": value, "raw_type": type(value).__name__}
+
+    # --- DECIDE（對齊 DSL cases；處理 true/"true"/"yes"/1）---
+    if value in (True, "true", "True", "yes", "1", 1):
+        label = TRUE_LABEL
+    else:
+        label = FALSE_LABEL
+
+    # --- OUT（固定 DEBUG log）---
+    return log_route(
+        ROUTE_NAME,
+        DSL_TITLE,
+        DSL_ID,
+        label,
+        condition_summary=condition,
+    )

@@ -1,7 +1,8 @@
-# dsl-to-langgraph
+# Dsl-to-Langgraph
 
-將工作流 DSL（Dify、LangFlow、Flowise、n8n，或通用 nodes／edges）轉成獨立 **LangGraph** Python 服務，並提供 **OpenAI-compatible HTTP API** 的 Agent Skill。
+**主用途：** 將 **Dify** 匯出的工作流 DSL（`kind: app` + `workflow.graph`）轉成獨立 **LangGraph** Python 服務，並提供 **OpenAI-compatible HTTP API**。
 
+次要相容：LangFlow／Flowise／n8n／通用 nodes＋edges。  
 適用環境：Cursor、OpenClaw、ChatGPT Custom GPT、Codex／GPT Skills，以及純 CLI。
 
 ## 內含程式
@@ -9,10 +10,13 @@
 | 程式 | 路徑 | 用途 |
 |---|---|---|
 | DSL 瘦身 | [`scripts/slim_dsl.py`](scripts/slim_dsl.py) | 去除大型匯出檔的 UI／佈局雜訊，並遮罩明顯密鑰，供後續解析或交給 agent |
-| DSL 解析 | [`scripts/parse_dsl.py`](scripts/parse_dsl.py) | 產出 inventory（來源類型、節點／邊、外部依賴、建議的 LangGraph 節點） |
-| 專案骨架 | [`scripts/scaffold_project.py`](scripts/scaffold_project.py) | 產生可執行的 LangGraph 專案骨架（`api.py`、`graph.py`、`state.py`、`nodes/` 等） |
+| DSL 解析 | [`scripts/parse_dsl.py`](scripts/parse_dsl.py) | 產出 inventory；Dify 另含 `dify_node_mapping`、`dify_branch_edges`、`has_citation` |
+| 專案骨架 | [`scripts/scaffold_project.py`](scripts/scaffold_project.py) | 產生 LangGraph 骨架；`--with-pgvector` 時加 RAG 資料庫（compose／schema／ingest） |
 
-輔助文件：[`SKILL.md`](SKILL.md)（agent 遷移流程）、[`references/`](references/)（對映／範例／驗收）、[`assets/templates/`](assets/templates/)（骨架模板）、[`agents/openai.yaml`](agents/openai.yaml)、[`gpt/CUSTOM_GPT_INSTRUCTIONS.md`](gpt/CUSTOM_GPT_INSTRUCTIONS.md)。
+輔助文件：[`SKILL.md`](SKILL.md)（agent 遷移流程）、[`references/`](references/)（對映／契約／範例／驗收）、[`assets/templates/`](assets/templates/)（骨架與**各節點類型**模板）、[`agents/openai.yaml`](agents/openai.yaml)、[`gpt/CUSTOM_GPT_INSTRUCTIONS.md`](gpt/CUSTOM_GPT_INSTRUCTIONS.md)。
+
+每個 Dify 節點功能必須**結構化**、禁止自由發揮：以 inventory `dify_node_mapping` 逐列複製對應模板（見 [`references/NODE_CONTRACT.md`](references/NODE_CONTRACT.md)、[`assets/templates/nodes/`](assets/templates/nodes/)）。  
+高頻節點另有 **DEBUG 固定外殼**（`node_debug.py`、`state.trace`、`run_node.py`、`DEBUG_NODES`）。
 
 ### `scripts/slim_dsl.py`
 
@@ -38,7 +42,9 @@ python3 scripts/slim_dsl.py path/to/flow.yml -o /tmp/flow.slim.json --format jso
 python3 scripts/parse_dsl.py /tmp/flow.slim.yml -o /tmp/inventory.json
 ```
 
-常見欄位：`source`、`has_rag`、`type_counts`、`external_hints`、`suggested_langgraph_nodes`。
+常見欄位：`source`、`has_rag`、`has_citation`、`type_counts`、`external_hints`、`suggested_langgraph_nodes`。  
+Dify 另有：`dify_node_mapping`（每節點 → implement／merge／ignore + LangGraph 名 + 模板）、`dify_branch_edges`（classifier／if-else 分支）。  
+有 KB 只建議 `retrieve`；偵測到引用／來源工項才建議 `order_citations`／`build_context`。
 
 ### `scripts/scaffold_project.py`
 
@@ -151,6 +157,7 @@ python3 /home/node/.openclaw/workspace/skills/dsl-to-langgraph/scripts/slim_dsl.
 
 - [`SKILL.md`](SKILL.md) — 遷移流程  
 - [`references/REFERENCE.md`](references/REFERENCE.md) — 節點對映與引用規則  
+- [`references/NODE_CONTRACT.md`](references/NODE_CONTRACT.md) — 各類型節點固定結構  
 - [`references/EXAMPLES.md`](references/EXAMPLES.md)  
 - [`references/CHECKLIST.md`](references/CHECKLIST.md)  
 

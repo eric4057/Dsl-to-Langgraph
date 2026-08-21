@@ -1,0 +1,32 @@
+-- pgvector RAG schema（Dify knowledge-retrieval → 獨立向量庫）
+-- 維度預設 1024（依 embedding 模型調整；改完需重建表）
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS rag_documents (
+    id              BIGSERIAL PRIMARY KEY,
+    collection      TEXT NOT NULL DEFAULT 'default',
+    source_key      TEXT NOT NULL,
+    title           TEXT,
+    url             TEXT,
+    path            TEXT,
+    content         TEXT NOT NULL,
+    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    embedding       vector({{EMBEDDING_DIM}}) NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS rag_documents_collection_source_uidx
+    ON rag_documents (collection, source_key);
+
+CREATE INDEX IF NOT EXISTS rag_documents_collection_idx
+    ON rag_documents (collection);
+
+-- IVFFlat 需有一定資料量後再建；開發期可用順序掃描
+-- CREATE INDEX rag_documents_embedding_ivfflat
+--     ON rag_documents USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+
+COMMENT ON TABLE rag_documents IS 'Dify knowledge-retrieval 對應的獨立 RAG 文件表';
+COMMENT ON COLUMN rag_documents.collection IS '對應 Dify dataset／平台名，多知識庫用不同 collection';
+COMMENT ON COLUMN rag_documents.source_key IS '穩定來源鍵（url 或 path），供 citation 共用編號';

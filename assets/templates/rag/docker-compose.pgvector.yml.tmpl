@@ -1,0 +1,25 @@
+# pgvector RAG（僅 DSL 含 knowledge-retrieval / has_rag 時使用）
+# 用法：docker compose -f docker-compose.pgvector.yml up -d
+
+services:
+  pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: {{PROJECT_SLUG}}-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: ragpass
+      POSTGRES_DB: rag
+    ports:
+      - "{{PGVECTOR_PORT}}:5432"
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+      - ./rag/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgvector_data:

@@ -1,8 +1,8 @@
 interface:
-  display_name: "DSL to LangGraph"
-  short_description: "Convert Dify/Flowise/n8n DSLs into LangGraph APIs."
+  display_name: "Dify DSL to LangGraph"
+  short_description: "Convert Dify workflow DSL exports into LangGraph + OpenAI-compatible APIs."
   brand_color: "#0F766E"
-  default_prompt: "Use $dsl-to-langgraph to convert this workflow DSL into a standalone LangGraph project with OpenAI-compatible api.py."
+  default_prompt: "Use $dsl-to-langgraph to convert this Dify DSL YAML into a standalone LangGraph project with OpenAI-compatible api.py. Follow dify_node_mapping from parse_dsl.py."
 
 policy:
   allow_implicit_invocation: true

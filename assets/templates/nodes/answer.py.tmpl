@@ -1,21 +1,32 @@
-"""Produce the final answer.
+"""節點：寫入最終答案（骨架佔位；交付前換成 DSL 真實邏輯）
 
-SKELETON ONLY: replace this placeholder with real DSL LLM / RAG / tool logic
-before delivery. Do not ship with this stub.
+DSL: answer
+DSL_ID: scaffold-answer
+讀取: query
+寫入: answer
 """
 
 from __future__ import annotations
 
-from langgraph.config import get_stream_writer
-
+from node_debug import NodeDebug
 from state import WorkflowState
+
+# --- META（DEBUG 定位）---
+NODE_KEY = "answer"
+DSL_TYPE = "answer"
+DSL_TITLE = "answer"
+DSL_ID = "scaffold-answer"
+READS = ("query",)
+WRITES = ("answer",)
 
 
 def answer_node(state: WorkflowState) -> dict:
-    query = state.get("query") or ""
-    # SKELETON: replace with DSL answer logic (and citation post-process if RAG).
-    text = f"已收到：{query}"
-    writer = get_stream_writer()
-    if writer:
-        writer({"type": "answer_delta", "content": text})
-    return {"answer": text}
+    dbg = NodeDebug(NODE_KEY, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
+    try:
+        # --- READ ---
+        query = (state.get("query") or "").strip()
+
+        # --- WRITE（骨架；交付前刪除）---
+        return dbg.ok({"answer": f"（骨架）已收到：{query}"})
+    except Exception as exc:
+        return dbg.fail(exc, fallback={"answer": "回答產生失敗"})

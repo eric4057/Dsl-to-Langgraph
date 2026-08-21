@@ -1,0 +1,43 @@
+"""節點：{{NODE_PURPOSE}}
+
+DSL: llm / {{DSL_TITLE}}
+DSL_ID: {{DSL_ID}}
+讀取: {{READ_FIELDS}}
+寫入: {{WRITE_FIELDS}}
+"""
+
+from __future__ import annotations
+
+from node_debug import NodeDebug
+from prompts import {{PROMPT_CONSTANT}}
+from services import chat_text
+from state import WorkflowState
+
+# --- META（DEBUG 定位；遷移時填 DSL 真實值）---
+NODE_KEY = "{{FUNC_NAME}}"
+DSL_TYPE = "llm"
+DSL_TITLE = "{{DSL_TITLE}}"
+DSL_ID = "{{DSL_ID}}"
+READS = ("query",)  # 依 DSL 擴充：context / evidence_text / history
+WRITES = ("{{OUTPUT_FIELD}}",)
+
+
+def {{FUNC_NAME}}_node(state: WorkflowState) -> dict:
+    dbg = NodeDebug(NODE_KEY, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
+    try:
+        # --- READ ---
+        query = (state.get("query") or "").strip()
+        # context = state.get("context") or ""
+
+        # --- CALL（I/O 只走 services）---
+        messages = [
+            {"role": "system", "content": {{PROMPT_CONSTANT}}},
+            {"role": "user", "content": query},
+        ]
+        text = chat_text(messages)
+        # JSON 輸出：改用 chat_json + schema
+
+        # --- WRITE ---
+        return dbg.ok({"{{OUTPUT_FIELD}}": (text or "").strip()})
+    except Exception as exc:
+        return dbg.fail(exc, fallback={"{{OUTPUT_FIELD}}": ""}, error_field="{{FUNC_NAME}}_error")

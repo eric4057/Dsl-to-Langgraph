@@ -1,0 +1,40 @@
+# pgvector RAG（Dify knowledge-retrieval）
+
+當 inventory **`has_rag=true`** 時使用本目錄；`has_rag=false` 可刪除整夾。
+
+## 啟動資料庫
+
+```bash
+# 預設埠見 .env 的 PGVECTOR_PORT（常為 5433，避免撞本機 5432）
+docker compose -f docker-compose.pgvector.yml up -d
+```
+
+連線字串（寫入 `.env`）：
+
+```text
+DATABASE_URL=postgresql://rag:ragpass@127.0.0.1:{{PGVECTOR_PORT}}/rag
+EMBEDDING_MODEL=your-embedding-model
+EMBEDDING_DIM={{EMBEDDING_DIM}}
+```
+
+## 建表
+
+容器首次啟動會自動跑 `rag/schema.sql`。若需重來：
+
+```bash
+docker compose -f docker-compose.pgvector.yml down -v
+docker compose -f docker-compose.pgvector.yml up -d
+```
+
+## 灌資料
+
+```bash
+python rag/ingest_pgvector.py --dir ./docs --collection default
+```
+
+多知識庫（多個 Dify `dataset_ids`）→ 用不同 `--collection`（建議用平台名或 dataset 短名）。
+
+## 檢索
+
+`services.search_knowledge(query, collection=...)`  
+`retrieve` 節點呼叫此函式；回傳正規化 documents 供後續 citation（僅 `has_citation=true` 時才加 citation 鏈）。

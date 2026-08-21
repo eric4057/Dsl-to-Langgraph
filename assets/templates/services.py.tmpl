@@ -1,0 +1,267 @@
+"""共用外部服務（LLM／HTTP／可選 pgvector RAG）。
+
+節點請呼叫本模組，勿在 nodes/ 內直接建 client 或硬編碼密鑰。
+DSL 有 knowledge-retrieval（has_rag）時使用 search_knowledge／embed_texts。
+"""
+
+from __future__ import annotations
+
+import json
+from functools import lru_cache
+from typing import Any
+
+import httpx
+from openai import OpenAI
+
+from config import settings
+
+
+@lru_cache(maxsize=1)
+def llm_client() -> OpenAI:
+    return OpenAI(
+        base_url=settings.openai_base_url,
+        api_key=settings.openai_api_key,
+    )
+
+
+def chat_text(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0.2,
+    model: str | None = None,
+) -> str:
+    """非串流文字補全。"""
+    response = llm_client().chat.completions.create(
+        model=model or settings.chat_model,
+        messages=messages,  # type: ignore[arg-type]
+        temperature=temperature,
+    )
+    content = response.choices[0].message.content
+    return (content or "").strip()
+
+
+def chat_json(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0.1,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """要求模型回 JSON；解析失敗時回傳 {"raw": text}。"""
+    text = chat_text(messages, temperature=temperature, model=model)
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+    try:
+        data = json.loads(cleaned)
+        return data if isinstance(data, dict) else {"raw": data}
+    except Exception:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                data = json.loads(cleaned[start : end + 1])
+                if isinstance(data, dict):
+                    return data
+            except Exception:
+                pass
+        return {"raw": text}
+
+
+def stream_chat(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0.2,
+    model: str | None = None,
+):
+    """逐 token 產出文字（供 answer 串流）。"""
+    stream = llm_client().chat.completions.create(
+        model=model or settings.chat_model,
+        messages=messages,  # type: ignore[arg-type]
+        temperature=temperature,
+        stream=True,
+    )
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        content = getattr(delta, "content", None) if delta is not None else None
+        if content:
+            yield content
+
+
+def http_request(
+    *,
+    method: str,
+    url: str,
+    params: dict[str, Any] | None = None,
+    json_body: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: float = 60.0,
+) -> tuple[int, Any]:
+    """通用 HTTP；回傳 (status_code, json|text)。密鑰只從 settings 組 headers。"""
+    with httpx.Client(timeout=timeout) as client:
+        response = client.request(
+            method.upper(),
+            url,
+            params=params,
+            json=json_body,
+            headers=headers,
+        )
+        try:
+            body: Any = response.json()
+        except Exception:
+            body = response.text
+        return response.status_code, body
+
+
+# ----- pgvector RAG（has_rag 時使用）-----
+
+
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    """呼叫 OpenAI-compatible embeddings API。"""
+    if not texts:
+        return []
+    response = llm_client().embeddings.create(
+        model=settings.embedding_model,
+        input=texts,
+    )
+    ordered = sorted(response.data, key=lambda item: item.index)
+    return [item.embedding for item in ordered]
+
+
+@lru_cache(maxsize=1)
+def _pg_conn_dsn() -> str:
+    dsn = (settings.database_url or "").strip()
+    if not dsn:
+        raise RuntimeError("未設定 DATABASE_URL（pgvector）。has_rag 專案請填 .env")
+    return dsn
+
+
+def search_knowledge(
+    query: str,
+    *,
+    collection: str | None = None,
+    top_k: int | None = None,
+) -> list[dict[str, Any]]:
+    """pgvector 相似度檢索。
+
+    正規化回傳：list[{content, score, metadata: {url|path, title, source_key, collection}}]
+    未設定 DATABASE_URL 時回 []（無 RAG 專案可忽略）。
+    """
+    q = (query or "").strip()
+    if not q:
+        return []
+    if not (settings.database_url or "").strip():
+        return []
+
+    coll = collection or settings.rag_default_collection
+    limit = int(top_k or settings.rag_top_k)
+    vector = embed_texts([q])[0]
+    vec_literal = "[" + ",".join(f"{x:.8f}" for x in vector) + "]"
+
+    try:
+        import psycopg
+    except ImportError as exc:
+        raise RuntimeError("需要 psycopg：pip install 'psycopg[binary]'") from exc
+
+    sql = """
+        SELECT content, title, url, path, source_key, collection, metadata,
+               1 - (embedding <=> %s::vector) AS score
+        FROM rag_documents
+        WHERE collection = %s
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+    """
+    with psycopg.connect(_pg_conn_dsn()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (vec_literal, coll, vec_literal, limit))
+            rows = cur.fetchall()
+
+    docs: list[dict[str, Any]] = []
+    for content, title, url, path, source_key, coll_name, metadata, score in rows:
+        meta = dict(metadata or {})
+        meta.update(
+            {
+                "title": title,
+                "url": url,
+                "path": path,
+                "source_key": source_key,
+                "collection": coll_name,
+            }
+        )
+        docs.append(
+            {
+                "content": content,
+                "score": float(score) if score is not None else 0.0,
+                "metadata": meta,
+            }
+        )
+    return docs
+
+
+def upsert_rag_documents(rows: list[dict[str, Any]]) -> int:
+    """寫入／更新 rag_documents。row 需含 embedding: list[float]。"""
+    if not rows:
+        return 0
+    try:
+        import psycopg
+    except ImportError as exc:
+        raise RuntimeError("需要 psycopg：pip install 'psycopg[binary]'") from exc
+
+    sql = """
+        INSERT INTO rag_documents (
+            collection, source_key, title, url, path, content, metadata, embedding, updated_at
+        ) VALUES (
+            %(collection)s, %(source_key)s, %(title)s, %(url)s, %(path)s, %(content)s,
+            %(metadata)s::jsonb, %(embedding)s::vector, NOW()
+        )
+        ON CONFLICT (collection, source_key) DO UPDATE SET
+            title = EXCLUDED.title,
+            url = EXCLUDED.url,
+            path = EXCLUDED.path,
+            content = EXCLUDED.content,
+            metadata = EXCLUDED.metadata,
+            embedding = EXCLUDED.embedding,
+            updated_at = NOW()
+    """
+    with psycopg.connect(_pg_conn_dsn()) as conn:
+        with conn.cursor() as cur:
+            for row in rows:
+                emb = row["embedding"]
+                vec_literal = "[" + ",".join(f"{float(x):.8f}" for x in emb) + "]"
+                cur.execute(
+                    sql,
+                    {
+                        "collection": row.get("collection") or settings.rag_default_collection,
+                        "source_key": row["source_key"],
+                        "title": row.get("title"),
+                        "url": row.get("url"),
+                        "path": row.get("path"),
+                        "content": row["content"],
+                        "metadata": json.dumps(row.get("metadata") or {}, ensure_ascii=False),
+                        "embedding": vec_literal,
+                    },
+                )
+        conn.commit()
+    return len(rows)
+
+
+def call_tool(name: str, **params: Any) -> Any:
+    """外部 tool 佔位（Firecrawl 等）。DSL 有 tool 節點時再實作。"""
+    raise NotImplementedError(f"tool 未實作: {name}; params={params!r}")
+
+
+def extract_document(
+    *,
+    path: str | None = None,
+    url: str | None = None,
+    raw: bytes | None = None,
+) -> str:
+    """文件抽取佔位。DSL 有 document-extractor 時再實作。"""
+    _ = (path, url, raw)
+    raise NotImplementedError("extract_document 未實作")

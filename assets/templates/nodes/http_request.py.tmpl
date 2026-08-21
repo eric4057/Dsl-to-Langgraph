@@ -1,0 +1,53 @@
+"""節點：HTTP 請求
+
+DSL: http-request / {{DSL_TITLE}}
+DSL_ID: {{DSL_ID}}
+讀取: {{READ_FIELDS}}
+寫入: {{BODY_FIELD}}, http_status, {{ERROR_FIELD}}
+"""
+
+from __future__ import annotations
+
+from node_debug import NodeDebug
+from services import http_request
+from state import WorkflowState
+
+# --- META（DEBUG 定位；遷移時填 DSL 真實值）---
+NODE_KEY = "{{FUNC_NAME}}"
+DSL_TYPE = "http-request"
+DSL_TITLE = "{{DSL_TITLE}}"
+DSL_ID = "{{DSL_ID}}"
+READS = ("query",)  # 依 DSL 改成實際參數欄位
+WRITES = ("{{BODY_FIELD}}", "http_status", "{{ERROR_FIELD}}")
+
+
+def {{FUNC_NAME}}_node(state: WorkflowState) -> dict:
+    dbg = NodeDebug(NODE_KEY, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
+    try:
+        # --- READ ---
+        # params 從 state／DSL 組出；密鑰只從 settings
+
+        # --- CALL ---
+        status, body = http_request(
+            method="{{METHOD}}",
+            url="{{URL_OR_FROM_STATE}}",
+            # params=..., json=..., headers=...
+        )
+
+        # --- WRITE ---
+        return dbg.ok(
+            {
+                "http_status": status,
+                "{{BODY_FIELD}}": body,
+                "{{ERROR_FIELD}}": None,
+            }
+        )
+    except Exception as exc:
+        return dbg.fail(
+            exc,
+            fallback={
+                "http_status": 0,
+                "{{BODY_FIELD}}": None,
+            },
+            error_field="{{ERROR_FIELD}}",
+        )

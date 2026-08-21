@@ -1,0 +1,27 @@
+"""節點：參數抽取
+
+DSL: parameter-extractor / {{DSL_TITLE}}
+讀取: {{SOURCE_FIELD}}
+寫入: {{WRITE_FIELDS}}
+"""
+
+from __future__ import annotations
+
+from prompts import EXTRACT_SYSTEM
+from services import chat_json
+from state import WorkflowState
+
+
+def extract_{{NAME}}_node(state: WorkflowState) -> dict:
+    source = (state.get("{{SOURCE_FIELD}}") or state.get("query") or "").strip()
+    payload = chat_json(
+        [
+            {"role": "system", "content": EXTRACT_SYSTEM},
+            {"role": "user", "content": source},
+        ],
+    )
+    # 失敗時給合理 fallback，避免整圖中斷
+    return {
+        # "{{FIELD}}": payload.get("{{FIELD}}") or default,
+        "extract_raw": payload,
+    }

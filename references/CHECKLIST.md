@@ -1,13 +1,18 @@
 # 交付 Checklist
 
-> 由 `SKILL.md` 按需載入。完成遷移時逐項確認：
+> 由 `SKILL.md` 按需載入。完成遷移時逐項確認。  
+> **範圍原則：** 以 **Dify DSL** 工項為準；inventory 沒有就不做。  
+> 實作清單以 `dify_node_mapping` 的 implement 列為準。
 
 ## 解析與設計
 
-- [ ] 已辨識 DSL 來源（Dify / LangFlow / Flowise / n8n / generic）
-- [ ] 已產出節點／邊 inventory（或同等說明）
-- [ ] 已畫出目標拓撲（文字或 mermaid）
-- [ ] 已標出需替代的外部依賴（KB、HTTP、tools）
+- [ ] 已辨識為 Dify（或註明次要格式）
+- [ ] 已產出 inventory（含 `dify_node_mapping`／`dify_branch_edges`）
+- [ ] 已畫出目標拓撲（文字或 mermaid，節點旁標 Dify title／id）
+- [ ] 已標出需替代的外部依賴（KB dataset_ids、HTTP、tools）
+- [ ] classifier／if-else 分支已用 `sourceHandle` 對齊 conditional edges
+- [ ] `has_rag=true` 時已產出／啟動 **pgvector**（compose＋schema＋`DATABASE_URL`＋ingest 或寫入介面）
+- [ ] `has_rag=false` 時**未**多餘建向量庫
 
 ## 專案結構
 
@@ -20,6 +25,18 @@
 - [ ] `.gitignore` 含 `.env`、`.venv`、`__pycache__`
 - [ ] 無骨架 stub／TODO 殘留在交付碼中
 
+## 節點結構化（禁止自由發揮）
+
+- [ ] 已依 `dify_node_mapping` **逐列**處理（implement／merge／ignore）
+- [ ] 每個 `implement` 都從對應 `.tmpl` 複製，未自創形狀
+- [ ] 每個 implement 檔含 META：`NODE_KEY`／`DSL_TYPE`／`DSL_TITLE`／`DSL_ID`／`READS`／`WRITES`
+- [ ] 函式名對齊 mapping 的 `langgraph_node`（`*_node` 或 `route_*`）
+- [ ] `merge`／`ignore` **沒有**對應空檔；merge 有在目標節點註明源 dify_id
+- [ ] 外部 I/O 在 `services.py`；節點內無直接建 client／硬編碼密鑰
+- [ ] 高頻節點含 `NodeDebug`／`log_route` + `READ→CALL→WRITE`
+- [ ] 專案含 `node_debug.py`、`state.trace`；可用 `DEBUG_NODES`／`run_node.py`
+- [ ] 無 inventory 之外的「額外神節點」
+
 ## 行為
 
 - [ ] 主要分支語意與 DSL 對齊
@@ -28,12 +45,20 @@
 - [ ] 串流：`answer_delta` → SSE（若需要串流）
 - [ ] 錯誤／空輸入有合理 HTTP 或回答
 
-## 引用／參考連結（RAG 時必勾）
+## 引用／參考連結（自動判定；勿手動臆測）
+
+> **由 skill 自行判斷，不必刻意撰寫或另開需求。**  
+> 判準：`parse_dsl.py` → inventory **`has_citation`**（及 `dify_node_mapping` 是否含 citation 衍生列）。  
+> - `has_citation=false` → **整節跳過，不要實作、不要勾**  
+> - `has_citation=true` → 必須實作並驗收下列項目  
+> （僅有 `has_rag`／`knowledge-retrieval`、無引用工項 → 只做 `retrieve`，本節仍跳過。）
+
+**僅 `has_citation=true` 時勾選：**
 
 - [ ] 節點含 `order_citations`／`build_context`（或等價合併實作）
 - [ ] 相同來源共用同一編號
 - [ ] 文中引用依第一次出現重編為連續 1..N（不跳號）
-- [ ] 預設 `[[n]](URL)`，或已依使用者指定保留原公開格式且順序仍一致
+- [ ] 文中格式優先保留 DSL 既有公開格式；無則 `[[n]](URL)`
 - [ ] `### 來源` 區塊順序與文中引用順序一致
 - [ ] 未使用來源不出現在來源區塊
 - [ ] 有針對亂序／跳號引用的單元測試（參考 `nchc_qa_langgraph`）

@@ -15,11 +15,21 @@ class Settings(BaseSettings):
     openai_base_url: str = "http://localhost:8000/v1"
     openai_api_key: str = "replace-me"
     chat_model: str = "gpt-4o-mini"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = {{EMBEDDING_DIM}}
 
     api_host: str = "0.0.0.0"
     api_port: int = {{API_PORT}}
     api_model: str = "{{API_MODEL}}"
     api_auth_key: str = ""
+
+    # 節點 DEBUG：true 時 node_debug 印 IN/OUT/ERR（state["trace"] 仍會累積）
+    debug_nodes: bool = False
+
+    # pgvector RAG（僅 has_rag 時需要）
+    database_url: str = ""
+    rag_default_collection: str = "default"
+    rag_top_k: int = 5
 
 
 settings = Settings()

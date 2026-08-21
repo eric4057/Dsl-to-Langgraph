@@ -140,7 +140,10 @@ def _dify_inventory(data: dict) -> dict[str, Any]:
 
 
 def _dify_hints(d: dict) -> dict[str, Any]:
+    """抽出 Dify node.data 遷移必要欄位（對齊 NODE_CONTRACT）。"""
     hints: dict[str, Any] = {}
+    ntype = str(d.get("type") or "")
+
     if "dataset_ids" in d:
         hints["dataset_ids"] = d.get("dataset_ids")
     if "dataset_id" in d:
@@ -159,6 +162,7 @@ def _dify_hints(d: dict) -> dict[str, Any]:
             }
     if "query_variable_selector" in d:
         hints["query_variable_selector"] = d.get("query_variable_selector")
+
     if "prompt_template" in d:
         hints["has_prompt"] = True
         hints["prompt_excerpt"] = _prompt_excerpt(d.get("prompt_template"))
@@ -168,35 +172,145 @@ def _dify_hints(d: dict) -> dict[str, Any]:
         code = d.get("code")
         if isinstance(code, str):
             hints["code_excerpt"] = _truncate(code, 1000)
-            hints["code_looks_like_citation"] = _code_looks_like_citation(code)
+            hints["code_looks_like_citation"] = _text_looks_like_citation(code)
+        if d.get("outputs") is not None:
+            hints["code_outputs"] = _truncate(d.get("outputs"), 400)
+        if d.get("variables") is not None:
+            hints["code_variables"] = _truncate(d.get("variables"), 400)
+
+    if ntype == "template-transform" and d.get("template") is not None:
+        tmpl = str(d.get("template") or "")
+        hints["template_excerpt"] = _truncate(tmpl, 800)
+        hints["template_looks_like_citation"] = _text_looks_like_citation(tmpl)
+
+    # question-classifier：classes.id 對應 edge.sourceHandle
     if "classes" in d:
         hints["classes"] = [
-            c.get("name") or c.get("id") for c in (d.get("classes") or []) if isinstance(c, dict)
+            {
+                "id": str(c.get("id") or ""),
+                "name": c.get("name") or c.get("id") or "",
+            }
+            for c in (d.get("classes") or [])
+            if isinstance(c, dict)
         ]
+
+    # if-else：cases.case_id 對應 edge.sourceHandle（含 false / 預設）
+    if ntype == "if-else" and isinstance(d.get("cases"), list):
+        cases_out = []
+        for case in d.get("cases") or []:
+            if not isinstance(case, dict):
+                continue
+            conds = []
+            for cond in case.get("conditions") or []:
+                if not isinstance(cond, dict):
+                    continue
+                conds.append(
+                    {
+                        "comparison_operator": cond.get("comparison_operator"),
+                        "value": cond.get("value"),
+                        "varType": cond.get("varType"),
+                        "variable_selector": cond.get("variable_selector"),
+                    }
+                )
+            cases_out.append(
+                {
+                    "case_id": str(case.get("case_id") or case.get("id") or ""),
+                    "logical_operator": case.get("logical_operator"),
+                    "conditions": conds,
+                }
+            )
+        hints["cases"] = cases_out
+
     if "model" in d:
         model = d.get("model")
         if isinstance(model, dict):
             hints["model"] = model.get("name") or model.get("provider")
             if model.get("completion_params"):
                 hints["completion_params"] = _truncate(model.get("completion_params"), 300)
-    if d.get("type") == "answer" and d.get("answer"):
-        hints["answer_template_excerpt"] = _truncate(str(d.get("answer")), 600)
+
+    if ntype == "answer" and d.get("answer"):
+        answer_tmpl = str(d.get("answer"))
+        hints["answer_template_excerpt"] = _truncate(answer_tmpl, 600)
+        hints["answer_looks_like_citation"] = _text_looks_like_citation(answer_tmpl)
+
+    if ntype == "http-request":
+        for key in ("method", "url", "headers", "params", "body", "timeout", "authorization"):
+            if key in d and d.get(key) is not None:
+                hints[key] = _truncate(d.get(key), 500)
+
+    if ntype == "tool":
+        for key in (
+            "provider_id",
+            "provider_name",
+            "provider_type",
+            "tool_name",
+            "tool_label",
+            "tool_configurations",
+            "tool_parameters",
+        ):
+            if key in d and d.get(key) is not None:
+                hints[key] = _truncate(d.get(key), 500)
+
+    if ntype == "agent":
+        for key in ("agent_parameters", "tools", "instruction", "query", "model"):
+            if key in d and d.get(key) is not None:
+                hints[key] = _truncate(d.get(key), 800)
+
+    if ntype in {"iteration", "loop"}:
+        for key in ("iterator_selector", "output_selector", "startNodeType", "is_parallel"):
+            if key in d and d.get(key) is not None:
+                hints[key] = _truncate(d.get(key), 300)
+
+    if ntype == "parameter-extractor":
+        for key in ("parameters", "instruction", "query", "model", "reasoning_mode"):
+            if key in d and d.get(key) is not None:
+                hints[key] = _truncate(d.get(key), 500)
+
+    if hints.get("prompt_excerpt") is not None:
+        hints["prompt_looks_like_citation"] = _text_looks_like_citation(
+            _flatten_for_scan(hints.get("prompt_excerpt"))
+        )
     return hints
 
 
-def _code_looks_like_citation(code: str) -> bool:
-    lowered = code.lower()
+def _flatten_for_scan(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except Exception:
+        return str(value)
+
+
+def _text_looks_like_citation(text: str) -> bool:
+    """偵測引用／來源組裝工項（code／template／prompt／answer）。"""
+    if not text:
+        return False
+    lowered = text.lower()
     markers = (
         "citation",
         "source_url",
+        "source_path",
+        "citation_map",
+        "order_citation",
         "### 來源",
         "[[",
         "retriever_resource",
         "document id",
+        "<document",
         "引用",
         "來源",
     )
-    return any(marker.lower() in lowered if marker.isascii() else marker in code for marker in markers)
+    return any(
+        (marker.lower() in lowered) if marker.isascii() else (marker in text)
+        for marker in markers
+    )
+
+
+# 相容舊名稱
+_code_looks_like_citation = _text_looks_like_citation
 
 
 def _generic_inventory(data: dict, source: str) -> dict[str, Any]:
@@ -372,7 +486,12 @@ def parse(path: Path) -> dict[str, Any]:
             }
     inv["file"] = str(path)
     inv["has_rag"] = _has_rag(inv)
+    inv["has_citation"] = _has_citation_work(inv)
     inv["suggested_langgraph_nodes"] = _suggest_nodes(inv)
+    # Dify 主軸：逐節點對照表（實作／合併／忽略）
+    if inv.get("source") == "dify":
+        inv["dify_node_mapping"] = _dify_node_mapping(inv)
+        inv["dify_branch_edges"] = _dify_branch_edges(inv)
     return inv
 
 
@@ -384,6 +503,188 @@ def _has_rag(inv: dict[str, Any]) -> bool:
             return True
     for hint in inv.get("external_hints") or []:
         if str(hint).startswith("vector/kb:"):
+            return True
+    return False
+
+
+def _slug_title(title: str, fallback: str) -> str:
+    """ASCII slug；中文／純數字 title 改用 fallback（避免函式名含 CJK 或只剩數字）。"""
+    text = (title or "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "_", text)
+    text = text.strip("_")
+    if not text or text.isdigit() or re.fullmatch(r"\d+", text):
+        return fallback
+    return text[:40]
+
+
+def _dify_node_mapping(inv: dict[str, Any]) -> list[dict[str, Any]]:
+    """Dify 節點 → LangGraph 建議（與 NODE_CONTRACT 對齊）。"""
+    rows: list[dict[str, Any]] = []
+    llm_i = 0
+    http_i = 0
+    code_i = 0
+    for node in inv.get("nodes") or []:
+        dtype = str(node.get("type") or "")
+        title = str(node.get("title") or "")
+        nid = str(node.get("id") or "")
+        hints = node.get("hints") or {}
+        action = "implement"
+        lg_name: str | None = None
+        note = ""
+
+        if dtype in {"custom-note"}:
+            action, note = "ignore", "文件用，不實作"
+        elif dtype in {"template-transform", "assigner", "variable-aggregator"}:
+            action, note = "merge", "glue：併入相鄰業務節點"
+        elif dtype in {"loop-start", "loop-end", "iteration-start"}:
+            action, note = "ignore", "迴圈結構標記"
+        elif dtype == "start":
+            lg_name = "normalize_input"
+        elif dtype == "answer":
+            lg_name = "answer"
+        elif dtype == "llm":
+            llm_i += 1
+            lg_name = _slug_title(title, f"llm_{llm_i}")
+            if not lg_name.endswith("_node") and "llm" not in lg_name:
+                lg_name = f"{lg_name}_llm" if lg_name != f"llm_{llm_i}" else "llm_answer"
+            if lg_name == "llm":
+                lg_name = "llm_answer"
+        elif dtype == "question-classifier":
+            lg_name = "classify"
+            note = "另需 route_after_classify；edge.sourceHandle=class.id"
+        elif dtype == "if-else":
+            lg_name = f"route_{_slug_title(title, nid[-4:] or 'cond')}"
+            note = "純路由函式；edge.sourceHandle=case_id"
+        elif dtype == "knowledge-retrieval":
+            lg_name = "retrieve"
+            note = "多 dataset → 多 collection 或合併檢索"
+        elif dtype == "http-request":
+            http_i += 1
+            lg_name = _slug_title(title, f"http_{http_i}")
+        elif dtype == "tool":
+            lg_name = _slug_title(str(hints.get("tool_name") or title), "tool_call")
+        elif dtype == "code":
+            if hints.get("code_looks_like_citation"):
+                action, lg_name = "merge", None
+                note = "引用／來源 code → 併入 order_citations／build_context／answer"
+            else:
+                code_i += 1
+                lg_name = _slug_title(title, f"transform_{code_i}")
+        elif dtype == "agent":
+            lg_name = "agent"
+            note = "優先改寫成 structured LLM + 後續 tool／http 節點"
+        elif dtype == "parameter-extractor":
+            lg_name = f"extract_{_slug_title(title, 'params')}"
+            note = "可與上游 agent／llm 合併"
+        elif dtype == "document-extractor":
+            lg_name = "extract_document"
+        elif dtype == "iteration":
+            lg_name = "iterate"
+        elif dtype == "loop":
+            lg_name = "loop_body"
+        else:
+            lg_name = dtype.replace("-", "_")
+            note = "非標準 type：依語意命名"
+
+        row: dict[str, Any] = {
+            "dify_id": nid,
+            "dify_type": dtype,
+            "dify_title": title,
+            "action": action,
+            "langgraph_node": lg_name,
+            "template": _dify_template_for(dtype, hints),
+            "note": note,
+        }
+        rows.append(row)
+
+    if inv.get("has_citation"):
+        rows.append(
+            {
+                "dify_id": "",
+                "dify_type": "(derived)",
+                "dify_title": "citation chain",
+                "action": "implement",
+                "langgraph_node": "order_citations",
+                "template": "order_citations.py.tmpl",
+                "note": "DSL 含引用／來源工項時衍生",
+            }
+        )
+        rows.append(
+            {
+                "dify_id": "",
+                "dify_type": "(derived)",
+                "dify_title": "citation chain",
+                "action": "implement",
+                "langgraph_node": "build_context",
+                "template": "build_context.py.tmpl",
+                "note": "DSL 含引用／來源工項時衍生",
+            }
+        )
+    return rows
+
+
+def _dify_template_for(dtype: str, hints: dict[str, Any]) -> str | None:
+    table = {
+        "start": "normalize_input.py.tmpl",
+        "llm": "llm.py.tmpl",
+        "answer": "answer_full.py.tmpl",
+        "question-classifier": "classify.py.tmpl",
+        "if-else": "route.py.tmpl",
+        "knowledge-retrieval": "retrieve.py.tmpl",
+        "http-request": "http_request.py.tmpl",
+        "tool": "tool.py.tmpl",
+        "code": "code_transform.py.tmpl",
+        "agent": "agent.py.tmpl",
+        "parameter-extractor": "parameter_extractor.py.tmpl",
+        "document-extractor": "document_extractor.py.tmpl",
+        "iteration": "iteration.py.tmpl",
+        "loop": "iteration.py.tmpl",
+    }
+    if dtype == "code" and hints.get("code_looks_like_citation"):
+        return None
+    return table.get(dtype)
+
+
+def _dify_branch_edges(inv: dict[str, Any]) -> list[dict[str, Any]]:
+    """整理 classifier／if-else 分支邊，方便組 add_conditional_edges。"""
+    nodes = {str(n.get("id")): n for n in (inv.get("nodes") or [])}
+    out: list[dict[str, Any]] = []
+    for edge in inv.get("edges") or []:
+        src = str(edge.get("source") or "")
+        node = nodes.get(src) or {}
+        dtype = str(node.get("type") or "")
+        if dtype not in {"if-else", "question-classifier"}:
+            continue
+        handle = edge.get("source_handle")
+        out.append(
+            {
+                "source_id": src,
+                "source_type": dtype,
+                "source_title": node.get("title"),
+                "source_handle": handle,
+                "target_id": str(edge.get("target") or ""),
+                "target_type": edge.get("target_type"),
+            }
+        )
+    return out
+
+
+def _has_citation_work(inv: dict[str, Any]) -> bool:
+    """僅當 DSL 含引用／來源組裝工項時為 True（不是有 KB 就 True）。"""
+    for node in inv.get("nodes") or []:
+        hints = node.get("hints") or {}
+        if any(
+            hints.get(key)
+            for key in (
+                "code_looks_like_citation",
+                "template_looks_like_citation",
+                "answer_looks_like_citation",
+                "prompt_looks_like_citation",
+            )
+        ):
+            return True
+        title = str(node.get("title") or "")
+        if any(token in title for token in ("引用", "citation", "來源區塊", "order_citation")):
             return True
     return False
 
@@ -436,20 +737,19 @@ def _suggest_nodes(inv: dict[str, Any]) -> list[str]:
                 continue
         _add(name)
 
-    # Dify code: citation/context glue → merge; other code → transform
+    # Dify code: citation／來源類併入 citation 鏈；其餘才留 transform
     code_nodes = [n for n in nodes if str(n.get("type")) == "code"]
-    if code_nodes:
-        if any((n.get("hints") or {}).get("code_looks_like_citation") for n in code_nodes):
-            if inv.get("has_rag"):
-                _add("order_citations")
-                _add("build_context")
-            else:
-                _add("build_context")
-        if any(not (n.get("hints") or {}).get("code_looks_like_citation") for n in code_nodes):
-            _add("transform")
+    if code_nodes and any(
+        not (n.get("hints") or {}).get("code_looks_like_citation") for n in code_nodes
+    ):
+        _add("transform")
 
+    # 有 KB → 只建議 retrieve（不要因 has_rag 強制 citation）
     if inv.get("has_rag"):
         _add("retrieve")
+
+    # 偵測到引用／來源工項才加 citation 鏈
+    if inv.get("has_citation") or _has_citation_work(inv):
         _add("order_citations")
         _add("build_context")
 
@@ -466,6 +766,7 @@ def _print_summary(inv: dict[str, Any]) -> None:
     print(f"nodes:  {len(inv.get('nodes') or [])}")
     print(f"edges:  {len(inv.get('edges') or [])}")
     print(f"has_rag:{inv.get('has_rag')}")
+    print(f"has_citation:{inv.get('has_citation')}")
     print("type_counts:")
     for key, val in sorted((inv.get("type_counts") or {}).items(), key=lambda x: (-x[1], str(x[0]))):
         print(f"  {key}: {val}")
@@ -476,6 +777,16 @@ def _print_summary(inv: dict[str, Any]) -> None:
     print("suggested_langgraph_nodes:")
     for name in inv.get("suggested_langgraph_nodes") or []:
         print(f"  - {name}")
+    if inv.get("dify_node_mapping"):
+        print("dify_node_mapping:")
+        for row in inv["dify_node_mapping"]:
+            lg = row.get("langgraph_node") or "-"
+            print(
+                f"  - [{row.get('action')}] {row.get('dify_type')} / {row.get('dify_title')} "
+                f"({row.get('dify_id')}) → {lg}"
+            )
+    if inv.get("dify_branch_edges"):
+        print(f"dify_branch_edges: {len(inv['dify_branch_edges'])}")
     if inv.get("error"):
         print(f"error:  {inv['error']}", file=sys.stderr)
 

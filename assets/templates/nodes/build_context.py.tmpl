@@ -1,0 +1,18 @@
+"""節點：組裝檢索 context 與 citation_map（RAG）
+
+DSL: (derived from template-transform / code context)
+讀取: documents
+寫入: context, citation_map
+"""
+
+from __future__ import annotations
+
+from logic import build_citation_context
+from state import WorkflowState
+
+
+def build_context_node(state: WorkflowState) -> dict:
+    docs = state.get("documents") or []
+    context, citation_map = build_citation_context(docs)
+    # citation_map: {n: {url|path, title, ...}}；來源鍵穩定
+    return {"context": context, "citation_map": citation_map}

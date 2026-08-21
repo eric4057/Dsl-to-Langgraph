@@ -36,7 +36,24 @@ def _render(text: str, mapping: dict[str, str]) -> str:
     return out
 
 
-def scaffold(out: Path, name: str, model_name: str, port: int) -> None:
+def _write(rel: str, src: Path, out: Path, mapping: dict[str, str]) -> None:
+    if not src.exists():
+        raise SystemExit(f"缺少模板: {src}")
+    target = out / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_render(src.read_text(encoding="utf-8"), mapping), encoding="utf-8")
+
+
+def scaffold(
+    out: Path,
+    name: str,
+    model_name: str,
+    port: int,
+    *,
+    with_pgvector: bool = False,
+    pgvector_port: int = 5433,
+    embedding_dim: int = 1024,
+) -> None:
     slug = _slug(name)
     api_model = (model_name or "").strip() or slug
     mapping = {
@@ -45,6 +62,8 @@ def scaffold(out: Path, name: str, model_name: str, port: int) -> None:
         "API_MODEL": api_model,
         "API_PORT": str(port),
         "GRAPH_EXPORT": slug.replace("-", "_"),
+        "PGVECTOR_PORT": str(pgvector_port),
+        "EMBEDDING_DIM": str(embedding_dim),
     }
     out.mkdir(parents=True, exist_ok=True)
     (out / "nodes").mkdir(exist_ok=True)
@@ -55,6 +74,9 @@ def scaffold(out: Path, name: str, model_name: str, port: int) -> None:
         "graph.py": TEMPLATES / "graph.py.tmpl",
         "state.py": TEMPLATES / "state.py.tmpl",
         "config.py": TEMPLATES / "config.py.tmpl",
+        "services.py": TEMPLATES / "services.py.tmpl",
+        "node_debug.py": TEMPLATES / "node_debug.py.tmpl",
+        "run_node.py": TEMPLATES / "run_node.py.tmpl",
         "langgraph.json": TEMPLATES / "langgraph.json.tmpl",
         "requirements.txt": TEMPLATES / "requirements.txt.tmpl",
         ".env.example": TEMPLATES / "env.example.tmpl",
@@ -66,11 +88,24 @@ def scaffold(out: Path, name: str, model_name: str, port: int) -> None:
         "tests/test_graph.py": TEMPLATES / "tests_test_graph.py.tmpl",
     }
     for rel, src in files.items():
-        if not src.exists():
-            raise SystemExit(f"缺少模板: {src}")
-        target = out / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(_render(src.read_text(encoding="utf-8"), mapping), encoding="utf-8")
+        _write(rel, src, out, mapping)
+
+    if with_pgvector:
+        rag_files = {
+            "docker-compose.pgvector.yml": TEMPLATES / "rag" / "docker-compose.pgvector.yml.tmpl",
+            "rag/schema.sql": TEMPLATES / "rag" / "schema.sql.tmpl",
+            "rag/ingest_pgvector.py": TEMPLATES / "rag" / "ingest_pgvector.py.tmpl",
+            "rag/README.md": TEMPLATES / "rag" / "README.md.tmpl",
+        }
+        for rel, src in rag_files.items():
+            _write(rel, src, out, mapping)
+        # 預設把 DATABASE_URL 寫進 .env.example 註解已存在；提示實際連線
+        print("  pgvector: docker-compose.pgvector.yml + rag/ 已產出")
+        print(
+            f"  DATABASE_URL=postgresql://rag:ragpass@127.0.0.1:{pgvector_port}/rag "
+            f"(EMBEDDING_DIM={embedding_dim})"
+        )
+
     print(f"scaffolded: {out}")
     print(f"  project_name={name!r}")
     print(f"  slug={mapping['PROJECT_SLUG']} model={mapping['API_MODEL']} port={mapping['API_PORT']}")
@@ -78,6 +113,9 @@ def scaffold(out: Path, name: str, model_name: str, port: int) -> None:
         print("提示: 專案名無 ASCII，已用 hash slug；建議加 --model-name 指定對外模型名")
     print("下一步: 依 DSL inventory 實作 nodes/ 與 graph 邊，並填 .env")
     print("注意: nodes/answer.py 為骨架佔位；交付前必須換成 DSL 真實邏輯（不可留 TODO）")
+    if with_pgvector:
+        print("RAG: docker compose -f docker-compose.pgvector.yml up -d")
+        print("     再 python rag/ingest_pgvector.py --dir ./docs --collection default")
 
 
 def main() -> None:
@@ -90,10 +128,30 @@ def main() -> None:
         help="OpenAI-compatible 模型名（中文專案名強烈建議指定）",
     )
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--with-pgvector",
+        action="store_true",
+        help="DSL has_rag 時加上：產出 pgvector docker／schema／ingest",
+    )
+    parser.add_argument("--pgvector-port", type=int, default=5433)
+    parser.add_argument(
+        "--embedding-dim",
+        type=int,
+        default=1024,
+        help="向量維度（須與 embedding 模型一致）",
+    )
     args = parser.parse_args()
     if args.out.exists() and any(args.out.iterdir()):
         raise SystemExit(f"目標目錄非空: {args.out}")
-    scaffold(args.out, args.name, args.model_name, args.port)
+    scaffold(
+        args.out,
+        args.name,
+        args.model_name,
+        args.port,
+        with_pgvector=args.with_pgvector,
+        pgvector_port=args.pgvector_port,
+        embedding_dim=args.embedding_dim,
+    )
 
 
 if __name__ == "__main__":

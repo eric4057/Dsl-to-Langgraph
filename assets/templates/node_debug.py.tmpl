@@ -1,0 +1,191 @@
+"""節點 DEBUG 固定格式（高頻節點共用）。
+
+用法：
+    from node_debug import NodeDebug
+
+    dbg = NodeDebug(NODE_KEY, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
+    try:
+        out = {...}
+        return dbg.ok(out)
+    except Exception as exc:
+        return dbg.fail(exc, fallback={...})  # 或 raise dbg.reraise(exc)
+
+環境變數／settings：
+    DEBUG_NODES=true  → 印 IN/OUT/ERR 到 stderr（logging）
+    無論開關，只要呼叫 ok/fail 都會寫入 state["trace"]（Annotated add）
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any, Mapping, Sequence
+
+logger = logging.getLogger("node_debug")
+
+
+def _debug_enabled() -> bool:
+    try:
+        from config import settings
+
+        return bool(getattr(settings, "debug_nodes", False))
+    except Exception:
+        return False
+
+
+def summarize(value: Any, *, max_str: int = 240, max_list: int = 5) -> Any:
+    """把 state 值壓成可讀摘要，避免 trace 爆量。"""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        if len(value) <= max_str:
+            return value
+        return f"{value[:max_str]}…({len(value)} chars)"
+    if isinstance(value, Mapping):
+        keys = list(value.keys())
+        return {
+            "_type": "dict",
+            "keys": keys[:30],
+            "n_keys": len(keys),
+        }
+    if isinstance(value, (list, tuple)):
+        return {
+            "_type": type(value).__name__,
+            "len": len(value),
+            "head": [summarize(v, max_str=120, max_list=2) for v in list(value)[:max_list]],
+        }
+    return repr(value)[:max_str]
+
+
+def read_fields(state: Mapping[str, Any], fields: Sequence[str]) -> dict[str, Any]:
+    return {k: summarize(state.get(k)) for k in fields}
+
+
+class NodeDebug:
+    """單一節點執行的固定 DEBUG 外殼。"""
+
+    def __init__(
+        self,
+        node_key: str,
+        dsl_type: str,
+        dsl_title: str,
+        dsl_id: str,
+        state: Mapping[str, Any],
+        reads: Sequence[str],
+    ) -> None:
+        self.node_key = node_key
+        self.dsl_type = dsl_type
+        self.dsl_title = dsl_title
+        self.dsl_id = dsl_id
+        self.reads = tuple(reads)
+        self._t0 = time.perf_counter()
+        self._read_summary = read_fields(state, reads)
+        if _debug_enabled():
+            logger.info(
+                "[node=%s dsl=%s/%s id=%s] IN reads=%s",
+                node_key,
+                dsl_type,
+                dsl_title,
+                dsl_id,
+                self._read_summary,
+            )
+
+    def _elapsed_ms(self) -> int:
+        return int((time.perf_counter() - self._t0) * 1000)
+
+    def _entry(
+        self,
+        *,
+        status: str,
+        writes: Mapping[str, Any] | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        write_keys = list((writes or {}).keys())
+        return {
+            "node": self.node_key,
+            "dsl_type": self.dsl_type,
+            "dsl_title": self.dsl_title,
+            "dsl_id": self.dsl_id,
+            "status": status,
+            "reads": self._read_summary,
+            "writes_keys": write_keys,
+            "writes": {k: summarize(v) for k, v in (writes or {}).items()},
+            "error": error,
+            "elapsed_ms": self._elapsed_ms(),
+        }
+
+    def ok(self, updates: dict[str, Any]) -> dict[str, Any]:
+        """業務成功：回傳 updates + trace entry。"""
+        entry = self._entry(status="ok", writes=updates)
+        if _debug_enabled():
+            logger.info(
+                "[node=%s dsl=%s/%s id=%s] OUT keys=%s elapsed_ms=%s",
+                self.node_key,
+                self.dsl_type,
+                self.dsl_title,
+                self.dsl_id,
+                entry["writes_keys"],
+                entry["elapsed_ms"],
+            )
+        out = dict(updates)
+        out["trace"] = [entry]
+        return out
+
+    def fail(
+        self,
+        exc: BaseException,
+        *,
+        fallback: dict[str, Any] | None = None,
+        error_field: str = "error",
+    ) -> dict[str, Any]:
+        """可恢復錯誤：寫入 error 欄位 + trace，不中斷整圖。"""
+        msg = f"{type(exc).__name__}: {exc}"
+        updates = dict(fallback or {})
+        updates.setdefault(error_field, msg)
+        entry = self._entry(status="error", writes=updates, error=msg)
+        if _debug_enabled():
+            logger.exception(
+                "[node=%s dsl=%s/%s id=%s] ERR elapsed_ms=%s",
+                self.node_key,
+                self.dsl_type,
+                self.dsl_title,
+                self.dsl_id,
+                entry["elapsed_ms"],
+            )
+        out = dict(updates)
+        out["trace"] = [entry]
+        return out
+
+    def reraise(self, exc: BaseException) -> BaseException:
+        """不可恢復：先打 ERR log／仍可手動把 trace 併進 raise 前的 state（通常直接 raise）。"""
+        if _debug_enabled():
+            logger.exception(
+                "[node=%s dsl=%s/%s id=%s] ERR(reraise) elapsed_ms=%s",
+                self.node_key,
+                self.dsl_type,
+                self.dsl_title,
+                self.dsl_id,
+                self._elapsed_ms(),
+            )
+        return exc
+
+
+def log_route(
+    route_name: str,
+    dsl_title: str,
+    dsl_id: str,
+    label: str,
+    *,
+    condition_summary: Mapping[str, Any] | None = None,
+) -> str:
+    """if-else / classifier 路由用：回傳 label，並在 DEBUG_NODES 時打固定格式 log。"""
+    if _debug_enabled():
+        logger.info(
+            "[route=%s dsl=if-else/%s id=%s] OUT label=%s condition=%s",
+            route_name,
+            dsl_title,
+            dsl_id,
+            label,
+            condition_summary or {},
+        )
+    return label

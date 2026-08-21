@@ -1,20 +1,30 @@
 ---
 name: dsl-to-langgraph
 description: >-
-  Convert workflow DSLs (Dify YAML, LangFlow/Flowise JSON, n8n graphs, or
-  generic nodes+edges) into a standalone LangGraph Python project with
-  graph.py, state.py, nodes/, api.py, and OpenAI-compatible HTTP API.
-  Use when converting DSL to LangGraph, migrating Dify/Flowise/n8n workflows,
-  scaffolding a LangGraph service, or rebuilding chat/RAG/video pipelines.
+  Convert Dify workflow DSL (YAML export: kind app + workflow.graph) into a
+  standalone LangGraph Python project with graph.py, state.py, nodes/,
+  services.py, api.py, and OpenAI-compatible HTTP API. Primary use: Dify →
+  LangGraph migration. Also accepts LangFlow/Flowise/n8n when needed.
+  Use when converting Dify DSL to LangGraph, migrating Dify chat/RAG/agent
+  apps, scaffolding a LangGraph service from a Dify export.
 ---
 
-# DSL → LangGraph
+# Dify DSL → LangGraph
 
 Agent-agnostic skill（Cursor / OpenClaw / GPT / Codex / 任何能讀 SKILL.md 的 agent）。
 
-將工作流 DSL 轉成**可獨立執行**的 LangGraph 專案（非平台外掛、非 runtime 解譯器）。
+**主用途：** 把 **Dify** 匯出的工作流 DSL（`advanced-chat`／`workflow`）轉成**可獨立執行**的 LangGraph 專案（非 Dify 外掛、非 runtime 解譯器）。  
+其他格式（LangFlow／Flowise／n8n）僅作次要相容。
 
-參考風格：`nchc_qa_langgraph`、`gba_langgraph`、`gba_dual_langgraph`。
+參考風格（皆由 Dify 語意遷出）：`nchc_qa_langgraph`、`gba_langgraph`、`gba_dual_langgraph`。
+
+### Dify 對齊原則
+
+1. 以 `workflow.graph.nodes[].data.type` 為唯一工項來源；inventory 的 `dify_node_mapping` 決定實作／合併／忽略
+2. 分支邊：`question-classifier`／`if-else` 的 `edge.sourceHandle` = class.id／case_id → `add_conditional_edges`
+3. Dify 變數選擇器（如 `{{#llm.text#}}`）→ LangGraph `state` 欄位
+4. Dify 內建知識庫 → **獨立 pgvector RAG**（見下方）；dataset_ids → collection 對照寫進 README
+5. 節點檔必須帶 `DSL_ID`（Dify node id）方便對回畫布 DEBUG
 
 ## 執行環境規則
 
@@ -32,7 +42,7 @@ Agent-agnostic skill（Cursor / OpenClaw / GPT / Codex / 任何能讀 SKILL.md �
 ├── graph.py
 ├── state.py
 ├── config.py
-├── services.py         # 選用
+├── services.py         # LLM／HTTP／KB（與 nodes 契約對齊；scaffold 必產）
 ├── nodes/
 ├── langgraph.json
 ├── requirements.txt 或 pyproject.toml
@@ -42,6 +52,11 @@ Agent-agnostic skill（Cursor / OpenClaw / GPT / Codex / 任何能讀 SKILL.md �
 ```
 
 預設：**語意等價遷移**（可合併 glue：template / assigner / 單純 aggregator）。
+
+### 範圍判斷原則（必遵）
+
+**一切「要不要做」只依 DSL 是否含對應工項／節點判斷**——inventory 有該 type／語意能力才實作；DSL 沒有就不要加。  
+勿因「常見最佳實務」或臆測需求而額外加功能（例如 DSL 無引用／來源組裝，就不要強制 citation 鏈）。
 
 ## 工作流程
 
@@ -88,13 +103,20 @@ python3 "$SKILL_DIR/scripts/parse_dsl.py" /tmp/flow.slim.yml [-o inventory.json]
 - LangFlow / Flowise component JSON → 對應來源
 - 其餘 `nodes` + `edges`/`links` → generic
 
-產出 inventory：名稱、節點、邊、分支／平行／迴圈、外部依賴。
+產出 inventory（Dify 時特別含）：
+
+- `type_counts`、`has_rag`、`has_citation`、`suggested_langgraph_nodes`
+- **`dify_node_mapping`**：每個 Dify 節點 → `action`（implement／merge／ignore）+ `langgraph_node` + 模板檔
+- **`dify_branch_edges`**：classifier／if-else 的 `sourceHandle` → target，用來組 conditional edges
+
+有 KB 只建議 `retrieve`；有引用／來源工項才建議 `order_citations`／`build_context`。  
+實作時**嚴格以 `dify_node_mapping` 逐列落地**（見 §3b）；禁止自由發揮節點功能或形狀。
 
 ### 2. 拓撲設計
 
 1. 合併 glue；保留 `if-else` / classifier / router 為 conditional edges
 2. 平行分支 → fan-in（參考 `gba_dual_langgraph`）
-3. 平台 KB → 獨立向量庫（常用 Qdrant）+ `retrieve`
+3. 平台 KB（`has_rag`）→ **pgvector** + `retrieve`（勿繼續綁 Dify 內建庫）
 4. 最終 `state["answer"]`；串流用 `get_stream_writer()` 發 `answer_delta`
 5. 先給 mermaid／文字流程再寫碼
 
@@ -102,6 +124,52 @@ python3 "$SKILL_DIR/scripts/parse_dsl.py" /tmp/flow.slim.yml [-o inventory.json]
 
 `TypedDict, total=False`。最少：`query`、`history`、中間產物、`answer`（可選 `sources`）。  
 節點：`def node(state) -> dict`，只回傳更新欄位。
+
+### 3b. 節點功能結構化（硬性；禁止自由發揮）
+
+**每個 Dify 節點的功能必須結構化實作，禁止自創抽象／合併無關邏輯／省略契約欄位。**
+
+#### 實作協定（逐列執行 `dify_node_mapping`）
+
+對 mapping 每一列：
+
+| `action` | 必須做 |
+|---|---|
+| `implement` | 1) 複製 `template` 指定的 `.tmpl` 2) 填入 `DSL_ID`／`DSL_TITLE`／`DSL_TYPE`／`NODE_KEY=langgraph_node` 3) 只改 READ／CALL／WRITE 內的業務語意（prompt、URL、條件）4) 函式名＝`{langgraph_node}_node` 或 `route_*` |
+| `merge` | **不建檔**；把語意併進 mapping 指定／相鄰的 implement 節點，並在該節點 docstring 註明「merged from \<dify_id\>」 |
+| `ignore` | **不建檔**（custom-note／loop-start 等） |
+
+禁止：
+
+- 不照模板、自己寫一套 node 形狀
+- 把多個無關 Dify type 塞進同一個「神節點」
+- inventory 沒有的能力（例如無引用工項卻加 citation 鏈）
+- 拿掉 META／`NodeDebug`／`DSL_ID`（高頻與 implement 節點皆須可對回 Dify 畫布）
+
+#### 固定形狀（所有 implement）
+
+詳見 [references/NODE_CONTRACT.md](references/NODE_CONTRACT.md)：
+
+1. docstring：`DSL: type / title`、`DSL_ID`、讀取、寫入  
+2. META 常數 + `READ → CALL → WRITE`  
+3. `*_node(state) -> dict`（route 為 `-> str`）+ partial update  
+4. I/O 只走 `services.py`；純邏輯可放 `logic.py`  
+5. 高頻 type 必須 `NodeDebug`／`log_route`；專案含 `node_debug.py`、`run_node.py`、`state.trace`、`DEBUG_NODES`
+
+| Dify type | 模板（不可改用別種形狀） |
+|---|---|
+| start | `normalize_input.py.tmpl` |
+| llm | `llm.py.tmpl` |
+| answer | `answer_full.py.tmpl` |
+| question-classifier | `classify.py.tmpl` |
+| if-else | `route.py.tmpl` |
+| knowledge-retrieval | `retrieve.py.tmpl` |
+| http-request / tool | `http_request.py.tmpl`／`tool.py.tmpl` |
+| code（非 citation） | `code_transform.py.tmpl` |
+| agent / parameter-extractor | `agent.py.tmpl`／`parameter_extractor.py.tmpl` |
+| document-extractor | `document_extractor.py.tmpl` |
+| loop／iteration | `iteration.py.tmpl` |
+| 引用衍生（僅 has_citation） | `order_citations.py.tmpl`／`build_context.py.tmpl` |
 
 ### 4. Scaffold
 
@@ -117,7 +185,29 @@ python3 "$SKILL_DIR/scripts/scaffold_project.py" \
 - 中文／非 ASCII 專案名會得到 `app-<hash>` slug；**務必**用 `--model-name` 指定對外模型名。
 - scaffold 的 `nodes/answer.py` 僅是骨架佔位；**交付前必須換成 DSL 真實邏輯**，不可把骨架 TODO／stub 當完成。
 
-無腳本時：複製 `assets/templates/` 並替換 `{{PROJECT_NAME}}`、`{{API_MODEL}}`、`{{API_PORT}}`、`{{PROJECT_SLUG}}`、`{{GRAPH_EXPORT}}`。
+#### 4b. DSL 需要知識庫時（`has_rag=true`）→ 建 pgvector
+
+**skill 自動依 inventory 判斷**；有 `knowledge-retrieval` 就加，沒有就不要建。
+
+```bash
+python3 "$SKILL_DIR/scripts/scaffold_project.py" \
+  --name <project_name> --out <target_dir> --model-name <api_model> --port <port> \
+  --with-pgvector --pgvector-port 5433 --embedding-dim 1024
+```
+
+產出：`docker-compose.pgvector.yml`、`rag/schema.sql`、`rag/ingest_pgvector.py`、`services.search_knowledge`（pgvector）。
+
+```bash
+docker compose -f docker-compose.pgvector.yml up -d
+# .env 設 DATABASE_URL=postgresql://rag:ragpass@127.0.0.1:5433/rag
+# 與 EMBEDDING_MODEL／EMBEDDING_DIM（維度須一致）
+python rag/ingest_pgvector.py --dir ./docs --collection default
+```
+
+多 Dify dataset → 多 `collection`；`retrieve` 依分類／platform 選 collection。  
+引用鏈仍只看 `has_citation`，與是否用 pgvector 無關。
+
+無腳本時：複製 `assets/templates/`（含 `rag/`）並替換 `{{PROJECT_NAME}}`、`{{API_MODEL}}`、`{{API_PORT}}`、`{{PROJECT_SLUG}}`、`{{GRAPH_EXPORT}}`、`{{PGVECTOR_PORT}}`、`{{EMBEDDING_DIM}}`。
 
 ### 5–6. 實作慣例
 
@@ -125,23 +215,28 @@ python3 "$SKILL_DIR/scripts/scaffold_project.py" \
 - `config.py`：pydantic-settings + `.env`
 - API 必備：`POST /v1/chat/completions`（含 stream）、`GET /v1/models`、`GET /health`
 - 可選 Bearer `API_AUTH_KEY`；模型名容忍 `openai/<name>`
-- 有檔案需求時加 `/v1/files`（參考 `gba_dual_langgraph`）
+- DSL 含上傳／文件節點時才加 `/v1/files`（參考 `gba_dual_langgraph`）
 - 使用者可見文案預設繁中
-- **有引用／參考連結的 RAG**：必須採固定順序（見下方與 [references/REFERENCE.md](references/REFERENCE.md)）
+- **引用／參考連結**：僅當 DSL 含對應工項（來源區塊／citation code／template／文中引用格式等）時才做（見下方與 [references/REFERENCE.md](references/REFERENCE.md)）
 
-#### RAG 引用／參考連結（固定順序，必做）
+#### RAG 引用／參考連結（skill 自動判定）
 
-當 DSL 含 knowledge-retrieval／來源區塊／citation 時：
+**不必人工刻意決定要不要做。** 以 `parse_dsl.py` 的 **`has_citation`** 為準：  
+- `false` → 整節不做、checklist 不勾  
+- `true` → 必須做下列固定順序  
+僅有 `has_rag`、無引用工項 → 只做 `retrieve`。
+
+`has_citation=true` 時採固定順序：
 
 1. 相同來源（URL 或檔案路徑）多個 chunk → **共用同一編號**
-2. **預設**文中引用格式：`[[n]](URL)`；編號依**文中第一次出現**從 1 起編，**連續不跳號**  
-   （若使用者指定保留原 DSL 公開引用格式，則遵從使用者；否則採用此標準）
+2. 文中引用格式：優先保留 **DSL 既有公開格式**；若 DSL 無明確格式則預設 `[[n]](URL)`；編號依**文中第一次出現**從 1 起編，**連續不跳號**
 3. `answer` 後處理必須依出現順序重編號；跳號／亂序要改寫成 1..N
 4. 文末 `### 來源` 區塊順序 = 文中引用順序（同一份 1..N 清單）
 5. 未實際用到的來源不要塞進來源區塊；完全沒引用時可 fallback 排序第一筆
 6. 建議節點：`retrieve → order_citations → build_context → answer`（citation 相關 `code` 併入後兩者）
 
 節點對映：[references/REFERENCE.md](references/REFERENCE.md)  
+節點契約：[references/NODE_CONTRACT.md](references/NODE_CONTRACT.md)  
 範例：[references/EXAMPLES.md](references/EXAMPLES.md)
 
 ### 7–8. 文件與驗收

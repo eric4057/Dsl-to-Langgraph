@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+import operator
+from typing import Annotated, Any, TypedDict
 
 
 class WorkflowState(TypedDict, total=False):
@@ -11,3 +12,6 @@ class WorkflowState(TypedDict, total=False):
     answer: str
     # 依 DSL 擴充：platform / documents / context / sources / ...
     meta: dict[str, Any]
+    # 節點 DEBUG：各 node 回傳 trace=[entry]，以 add 累積
+    trace: Annotated[list[dict[str, Any]], operator.add]
+    error: str

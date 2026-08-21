@@ -1,7 +1,7 @@
-"""節點：正規化輸入（scaffold 預設）
+"""節點：正規化輸入
 
-DSL: start
-DSL_ID: scaffold-start
+DSL: start / {{DSL_TITLE}}
+DSL_ID: {{DSL_ID}}
 讀取: query, history
 寫入: query, history
 """
@@ -11,25 +11,27 @@ from __future__ import annotations
 from node_debug import NodeDebug
 from state import WorkflowState
 
-# --- META（DEBUG 定位）---
-NODE_KEY = "start_input"
+# --- META（DEBUG 定位；遷移時填 DSL 真實值）---
+NODE_KEY = "normalize_input"
 DSL_TYPE = "start"
-DSL_TITLE = "start"
-DSL_ID = "scaffold-start"
+DSL_TITLE = "{{DSL_TITLE}}"
+DSL_ID = "{{DSL_ID}}"
 READS = ("query", "history")
 WRITES = ("query", "history")
 
 
-def start_node(state: WorkflowState) -> dict:
+def normalize_input_node(state: WorkflowState) -> dict:
     dbg = NodeDebug(NODE_KEY, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
     try:
         # --- READ ---
         query = (state.get("query") or "").strip()
         history = state.get("history") or []
+        if not isinstance(history, list):
+            history = []
 
         # --- VALIDATE ---
         if not query:
-            raise ValueError("問題不可為空白")
+            raise ValueError("query 不可為空")
 
         # --- WRITE ---
         return dbg.ok({"query": query, "history": history})

@@ -1,0 +1,40 @@
+"""節點：Code 轉換（薄包裝；核心邏輯放 logic.py）
+
+DSL: code / {{DSL_TITLE}}
+DSL_ID: {{DSL_ID}}
+讀取: {{READ_FIELDS}}
+寫入: {{WRITE_FIELDS}}
+"""
+
+from __future__ import annotations
+
+from logic import {{LOGIC_FUNC}}
+from node_debug import NodeDebug
+from state import WorkflowState
+
+# --- META（DEBUG 定位；遷移時填 DSL 真實值）---
+NODE_KEY = "{{FUNC_NAME}}"
+DSL_TYPE = "code"
+DSL_TITLE = "{{DSL_TITLE}}"
+DSL_ID = "{{DSL_ID}}"
+READS = ("query",)  # 改成 DSL code inputs 對應欄位
+WRITES = ("{{OUTPUT_FIELD}}",)
+
+
+def {{FUNC_NAME}}_node(state: WorkflowState) -> dict:
+    """若此 code 只做 citation／context／格式化 → 併入 build_context/answer，刪除此檔。"""
+    dbg = NodeDebug(NODE_KEY, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
+    try:
+        # --- READ + CALL（純邏輯在 logic.py，方便單測／DEBUG）---
+        result = {{LOGIC_FUNC}}(state)
+
+        # --- WRITE ---
+        if isinstance(result, dict):
+            return dbg.ok(result)
+        return dbg.ok({"{{OUTPUT_FIELD}}": result})
+    except Exception as exc:
+        return dbg.fail(
+            exc,
+            fallback={"{{OUTPUT_FIELD}}": None},
+            error_field="{{FUNC_NAME}}_error",
+        )

@@ -1,0 +1,17 @@
+"""節點：引用來源排序（RAG）
+
+DSL: (derived from knowledge-retrieval / citation code)
+讀取: documents
+寫入: documents
+"""
+
+from __future__ import annotations
+
+from logic import order_documents_for_citations
+from state import WorkflowState
+
+
+def order_citations_node(state: WorkflowState) -> dict:
+    docs = state.get("documents") or []
+    ordered = order_documents_for_citations(docs)
+    return {"documents": ordered}

@@ -1,0 +1,23 @@
+"""節點：外部工具
+
+DSL: tool / {{DSL_TITLE}}
+讀取: {{READ_FIELDS}}
+寫入: {{OUTPUT_FIELD}}, {{ERROR_FIELD}}
+"""
+
+from __future__ import annotations
+
+from services import call_tool
+from state import WorkflowState
+
+
+def {{FUNC_NAME}}_node(state: WorkflowState) -> dict:
+    # 參數對齊 DSL tool input；認證只從 settings
+    try:
+        result = call_tool(
+            name="{{TOOL_NAME}}",
+            # **params from state
+        )
+        return {"{{OUTPUT_FIELD}}": result, "{{ERROR_FIELD}}": None}
+    except Exception as exc:
+        return {"{{OUTPUT_FIELD}}": None, "{{ERROR_FIELD}}": str(exc)}

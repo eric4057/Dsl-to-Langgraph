@@ -1,0 +1,19 @@
+"""節點：文件／媒體抽取
+
+DSL: document-extractor / {{DSL_TITLE}}
+讀取: file_path | file_url | file_bytes
+寫入: extracted_text
+"""
+
+from __future__ import annotations
+
+from services import extract_document
+from state import WorkflowState
+
+
+def extract_document_node(state: WorkflowState) -> dict:
+    path = state.get("file_path")
+    url = state.get("file_url")
+    raw = state.get("file_bytes")
+    text = extract_document(path=path, url=url, raw=raw) or ""
+    return {"extracted_text": text}

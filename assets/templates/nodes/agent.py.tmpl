@@ -1,0 +1,27 @@
+"""節點：Agent 規劃（優先單次 structured LLM；需要工具則拆後續節點）
+
+DSL: agent / {{DSL_TITLE}}
+讀取: query
+寫入: {{WRITE_FIELDS}}
+"""
+
+from __future__ import annotations
+
+from prompts import AGENT_SYSTEM
+from services import chat_json
+from state import WorkflowState
+
+
+def {{FUNC_NAME}}_node(state: WorkflowState) -> dict:
+    query = (state.get("query") or "").strip()
+    payload = chat_json(
+        [
+            {"role": "system", "content": AGENT_SYSTEM},
+            {"role": "user", "content": query},
+        ],
+    )
+    # 對齊 DSL agent 輸出：如 queries / plan / tool_calls
+    return {
+        "plan_raw": payload,
+        # "queries": payload.get("queries") or [],
+    }

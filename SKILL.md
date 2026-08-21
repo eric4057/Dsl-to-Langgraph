@@ -62,13 +62,15 @@ Agent-agnostic skill（Cursor / OpenClaw / GPT / Codex / 任何能讀 SKILL.md �
 
 ```text
 Progress:
+- [ ] 快速路徑: deploy.py 一鍵部署（跳至 §4a-快速，自動 0→4b + install + start）
+---
 - [ ] 0. （建議）預處理瘦身大 DSL
 - [ ] 1. 辨識 DSL 並解析圖 → inventory.json
 - [ ] 2. 畫出目標 LangGraph 拓撲（對照 dify_node_mapping）
 - [ ] 3. 定義／確認 WorkflowState 欄位
 - [ ] 4. scaffold 專案骨架
-- [ ] 4b. **generate_from_inventory**（自動化填 nodes／graph／logic／prompts）
-- [ ] 5. 校對 selector／merge 註解／環境變數；補 conditional edges（若有）
+- [ ] 4b. **generate_from_inventory**（自動化填 nodes／graph／logic／prompts，含 conditional edges）
+- [ ] 5. 校對 selector／merge 註解／環境變數
 - [ ] 6. 確認 OpenAI-compatible api.py（上傳節點才加 /v1/files）
 - [ ] 7. README、.env、測試
 - [ ] 8. 對照 checklist 驗收
@@ -186,7 +188,30 @@ python3 "$SKILL_DIR/scripts/scaffold_project.py" \
 - 中文／非 ASCII 專案名會得到 `app-<hash>` slug；**務必**用 `--model-name` 指定對外模型名。
 - scaffold 的 `nodes/answer.py` 僅是骨架佔位；**下一步必須跑 `generate_from_inventory.py`（或手動依 mapping 換掉）**，不可把骨架 TODO／stub 當完成。
 
-#### 4b. 依 inventory 自動產生節點（建議；半自動主路徑）
+#### 4a-快速. 一鍵部署（deploy.py）
+
+**最簡路徑：** 一條指令完成 parse → generate → install → start → health check：
+
+```bash
+python3 "$SKILL_DIR/scripts/deploy.py" <dsl-file> \
+  --name my-bot --model-name my-bot --port 8030 --out ./my-bot
+```
+
+| 參數 | 說明 |
+|---|---|
+| `dsl`（positional） | Dify DSL YAML 路徑 |
+| `--name` | 專案名稱（省略則取 DSL 檔名） |
+| `--model-name` | API model 名（省略則同 `--name`） |
+| `--port` | 服務埠（預設 8000） |
+| `--out` | 輸出目錄（預設 `./<name>`） |
+| `--no-start` | 只 codegen 不啟動 |
+| `--slim` | 強制先瘦身（預設 >500 行自動觸發） |
+| `--with-pgvector` | 加 pgvector RAG（`has_rag` 時自動帶入） |
+
+執行後自動：slim → parse → scaffold + generate（含 conditional edges）→ venv + pip install → `.env` → compile check → uvicorn 啟動 → `/health` 輪詢。  
+使用者只需事後在 `.env` 填入 LLM 連線資訊（`OPENAI_BASE_URL`、`OPENAI_API_KEY`、`CHAT_MODEL`）再重啟。
+
+#### 4b. 依 inventory 自動產生節點（半自動路徑）
 
 把「逐列 mapping → 複製模板、填 META、接 has_rag／has_citation／merge 註記、組 graph」自動化：
 
@@ -212,15 +237,22 @@ python3 "$SKILL_DIR/scripts/generate_from_inventory.py" \
 | 產出 | 說明 |
 |---|---|
 | `nodes/*.py` | 每個 `implement` 一檔；META／`DSL_ID` 已填 |
-| `graph.py` | 依 edges 線性串接；`has_citation` 插入 citation 鏈 |
+| `graph.py` | 依 edges 串接（含 `add_conditional_edges`）；`has_citation` 插入 citation 鏈 |
 | `logic.py` | 嵌入 Dify `code` 的 `main`（需 `--dsl` 才完整） |
 | `prompts.py` | 抽出 LLM system／user 模板 + 粗略 selector 替換 |
 | `state.py` | 依輸出欄位擴充 |
-| `GENERATE_REPORT.json` | merge 對照、警告（分支邊等） |
+| `GENERATE_REPORT.json` | merge 對照、警告 |
 
-**腳本不做／需 Agent 校對：**
+**自動處理：**
 
-- `dify_branch_edges` → `add_conditional_edges`（報告會警告）
+- `dify_branch_edges` → `add_conditional_edges`（question-classifier 用 `route_after_*`、if-else 用 `route_*` 雙版本函式）
+- if-else route 節點產出 `_node → dict`（存 state）+ `route → str`（conditional edge 用）兩個函式
+- 分支邊用 conditional edges、非分支邊用 linear edges
+- `tool` / `parameter-extractor` 類型產出 stub + TODO
+- DSL `environment_variables` 始終 append 到 `.env.example`
+
+**需 Agent 校對：**
+
 - merge 節點的整理邏輯實際呼叫（只在目標節點註明 merged from）
 - `{{#nodeId.field#}}` 複雜 selector 對齊
 - `/v1/files`、真實 `.env` 連線與行為驗收

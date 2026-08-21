@@ -665,6 +665,362 @@ def {func_name}_node(state: WorkflowState) -> dict:
             node_func_by_lg[lg] = f"{func_name}_node"
             continue
 
+        # --- if-else: extract condition from DSL and fill route template ---
+        if dtype == "if-else":
+            route_suffix = lg.replace("route_", "") if lg.startswith("route_") else lg
+            route_name = route_suffix
+            cond_field = "query"
+            cond_op = "is"
+            cond_val = "True"
+            cases_info: list[tuple[str, str]] = []
+
+            dsl_cases = data.get("cases") or []
+            if dsl_cases:
+                first_case = dsl_cases[0]
+                conds = first_case.get("conditions") or []
+                if conds:
+                    sel = conds[0].get("variable_selector") or []
+                    cond_field = _selector_to_state_key(list(sel), id_to_lg, http_body_fields)
+                    cond_op = str(conds[0].get("comparison_operator") or "is")
+                    cond_val = str(conds[0].get("value") or "True")
+                    state_fields.add(cond_field)
+                for case in dsl_cases:
+                    case_id = str(case.get("case_id") or case.get("id") or "true")
+                    case_conds = case.get("conditions") or []
+                    case_val = str(case_conds[0].get("value") or case_id) if case_conds else case_id
+                    cases_info.append((case_id, case_val))
+
+            if not cases_info:
+                cases_info = [("true", "True")]
+
+            if len(cases_info) <= 1:
+                true_label = cases_info[0][0] if cases_info else "true"
+                decide_block = (
+                    f"    value = state.get({_py_str(cond_field)})\n"
+                    f"    condition = {{{_py_str(cond_field)}: value, \"raw_type\": type(value).__name__}}\n\n"
+                )
+                if cond_op in ("is", "=", "=="):
+                    decide_block += (
+                        f"    if str(value).strip() == {_py_str(cond_val)}:\n"
+                        f"        label = {_py_str(true_label)}\n"
+                        f"    else:\n"
+                        f'        label = "false"\n'
+                    )
+                elif cond_op in ("≠", "!=", "is not"):
+                    decide_block += (
+                        f"    if str(value).strip() != {_py_str(cond_val)}:\n"
+                        f"        label = {_py_str(true_label)}\n"
+                        f"    else:\n"
+                        f'        label = "false"\n'
+                    )
+                else:
+                    decide_block += (
+                        f"    # operator: {cond_op} {cond_val}\n"
+                        f"    if value in (True, \"true\", \"True\", \"yes\", \"1\", 1):\n"
+                        f"        label = {_py_str(true_label)}\n"
+                        f"    else:\n"
+                        f'        label = "false"\n'
+                    )
+            else:
+                decide_block = (
+                    f"    value = str(state.get({_py_str(cond_field)}) or \"\").strip()\n"
+                    f"    condition = {{{_py_str(cond_field)}: value}}\n\n"
+                )
+                for i, (cid, cval) in enumerate(cases_info):
+                    kw = "if" if i == 0 else "elif"
+                    decide_block += f"    {kw} value == {_py_str(cval)}:\n        label = {_py_str(cid)}\n"
+                decide_block += f'    else:\n        label = "false"\n'
+
+            label_field = f"route_{route_name}_label"
+            state_fields.add(label_field)
+
+            node_src = f'''"""路由：{title}（無 I/O）
+
+DSL: if-else / {title}
+DSL_ID: {nid}
+{f"merge note: {merge_doc}" if merge_doc else ""}
+讀取: {cond_field}
+寫入: {label_field}
+"""
+
+from __future__ import annotations
+
+from node_debug import NodeDebug
+from state import WorkflowState
+
+# --- META（DEBUG 定位；遷移時填 DSL 真實值）---
+ROUTE_NAME = {_py_str(route_name)}
+DSL_TYPE = "if-else"
+DSL_TITLE = {_py_str(title)}
+DSL_ID = {_py_str(nid)}
+READS = ({_py_str(cond_field)},)
+WRITES = ({_py_str(label_field)},)
+
+
+def _decide(state: WorkflowState) -> str:
+    """Pure routing decision — returns label string."""
+{decide_block}
+    return label
+
+
+def route_{route_name}_node(state: WorkflowState) -> dict:
+    dbg = NodeDebug(ROUTE_NAME, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
+    label = _decide(state)
+    return dbg.ok({{"{label_field}": label}})
+
+
+def route_{route_name}(state: WorkflowState) -> str:
+    """For add_conditional_edges — returns label string."""
+    return state.get("{label_field}") or _decide(state)
+'''
+            target = nodes_dir / f"route_{route_name}.py"
+            target.write_text(node_src, encoding="utf-8")
+            generated_files.append(str(target.relative_to(out)))
+            fn_name = f"route_{route_name}_node"
+            route_fn = f"route_{route_name}"
+            export_names.append(fn_name)
+            export_names.append(route_fn)
+            node_func_by_lg[lg] = fn_name
+            continue
+
+        # --- loop / iteration: fill with sensible defaults ---
+        if dtype in ("loop", "iteration"):
+            list_field = "items"
+            accum_field = "loop_results"
+            max_items = 50
+            loop_vars = data.get("loop_variables") or []
+            if loop_vars:
+                list_field = str(loop_vars[0].get("label") or "items")
+            state_fields.update({list_field, accum_field})
+
+            node_src = f'''"""節點：迭代／批次（有上限；避免無限迴圈）
+
+DSL: {dtype} / {title}
+DSL_ID: {nid}
+{f"merge note: {merge_doc}" if merge_doc else ""}
+讀取: {list_field}
+寫入: {accum_field}
+"""
+
+from __future__ import annotations
+
+from state import WorkflowState
+
+_MAX_ITEMS = {max_items}
+
+
+def {func_name}_node(state: WorkflowState) -> dict:
+    items = state.get("{list_field}") or []
+    if not isinstance(items, list):
+        items = []
+    items = items[:_MAX_ITEMS]
+
+    results = []
+    for item in items:
+        try:
+            results.append({{"item": item, "processed": True}})
+        except Exception as exc:
+            results.append({{"error": str(exc), "item": item}})
+
+    return {{"{accum_field}": results}}
+'''
+            target = nodes_dir / f"{func_name}.py"
+            target.write_text(node_src, encoding="utf-8")
+            generated_files.append(str(target.relative_to(out)))
+            export_names.append(f"{func_name}_node")
+            node_func_by_lg[lg] = f"{func_name}_node"
+            continue
+
+        # --- question-classifier: extract classes from DSL ---
+        if dtype == "question-classifier":
+            classes = data.get("classes") or []
+            instruction = str(data.get("instruction") or "")
+            agent_params = data.get("agent_parameters") or {}
+            if not instruction and isinstance(agent_params, dict):
+                inst_cfg = agent_params.get("instruction") or {}
+                if isinstance(inst_cfg, dict):
+                    instruction = str(inst_cfg.get("value") or "")
+
+            label_names: dict[str, str] = {}
+            label_ids: list[str] = []
+            for cls in classes:
+                cid = str(cls.get("id") or "")
+                cname = str(cls.get("name") or cid)
+                if cid:
+                    label_ids.append(cid)
+                    label_names[cid] = cname
+
+            if not label_ids:
+                label_ids = ["1", "2"]
+                label_names = {"1": "類別A", "2": "其他"}
+
+            classify_prompt = instruction or "根據使用者的問題判斷分類，只回答數字。"
+            classify_prompt += "\n\n" + "\n".join(f"{k}. {v}" for k, v in label_names.items())
+            classify_prompt += "\n\n只輸出一個數字。"
+
+            state_fields.update({"classify_label", "classify_reason"})
+
+            labels_tuple = ", ".join(_py_str(lid) for lid in label_ids)
+            labels_dict = ", ".join(f"{_py_str(k)}: {_py_str(v)}" for k, v in label_names.items())
+
+            node_src = f'''"""節點：問題分類
+
+DSL: question-classifier / {title}
+DSL_ID: {nid}
+{f"merge note: {merge_doc}" if merge_doc else ""}
+讀取: query
+寫入: classify_label, classify_reason
+"""
+
+from __future__ import annotations
+
+from node_debug import NodeDebug
+from services import chat_text
+from state import WorkflowState
+
+NODE_KEY = "{func_name}"
+DSL_TYPE = "question-classifier"
+DSL_TITLE = {_py_str(title)}
+DSL_ID = {_py_str(nid)}
+READS = ("query",)
+WRITES = ("classify_label", "classify_reason")
+
+_LABELS = ({labels_tuple})
+_LABEL_NAMES = {{{labels_dict}}}
+
+CLASSIFY_INSTRUCTION = {_py_str(classify_prompt)}
+
+
+def {func_name}_node(state: WorkflowState) -> dict:
+    dbg = NodeDebug(NODE_KEY, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
+    try:
+        query = (state.get("query") or "").strip()
+        raw = chat_text(
+            [{{"role": "system", "content": CLASSIFY_INSTRUCTION}},
+             {{"role": "user", "content": query}}],
+            temperature=0.1,
+        )
+        label = raw.strip()
+        if label not in _LABELS:
+            label = _LABELS[-1]
+        return dbg.ok({{"classify_label": label, "classify_reason": raw}})
+    except Exception as exc:
+        return dbg.fail(
+            exc,
+            fallback={{"classify_label": _LABELS[-1], "classify_reason": ""}},
+            error_field="classify_error",
+        )
+
+
+def route_after_{func_name}(state: WorkflowState) -> str:
+    """For add_conditional_edges — returns classify_label."""
+    return str(state.get("classify_label") or _LABELS[-1]).strip()
+'''
+            target = nodes_dir / f"{func_name}.py"
+            target.write_text(node_src, encoding="utf-8")
+            generated_files.append(str(target.relative_to(out)))
+            export_names.append(f"{func_name}_node")
+            export_names.append(f"route_after_{func_name}")
+            node_func_by_lg[lg] = f"{func_name}_node"
+            continue
+
+        # --- agent: extract instruction from DSL ---
+        if dtype == "agent":
+            agent_params = data.get("agent_parameters") or {}
+            agent_instruction = ""
+            if isinstance(agent_params, dict):
+                inst_cfg = agent_params.get("instruction") or {}
+                if isinstance(inst_cfg, dict):
+                    agent_instruction = str(inst_cfg.get("value") or "")
+            if not agent_instruction:
+                agent_instruction = "你是助理，請根據提供的內容回答使用者問題。"
+            out_field = "agent_text"
+            state_fields.add(out_field)
+
+            node_src = f'''"""節點：Agent
+
+DSL: agent / {title}
+DSL_ID: {nid}
+{f"merge note: {merge_doc}" if merge_doc else ""}
+讀取: query, context
+寫入: {out_field}
+"""
+
+from __future__ import annotations
+
+from node_debug import NodeDebug
+from services import chat_text
+from state import WorkflowState
+
+NODE_KEY = "{func_name}"
+DSL_TYPE = "agent"
+DSL_TITLE = {_py_str(title)}
+DSL_ID = {_py_str(nid)}
+READS = ("query", "context")
+WRITES = ({_py_str(out_field)},)
+
+AGENT_SYSTEM = {_py_str(agent_instruction[:2000])}
+
+
+def {func_name}_node(state: WorkflowState) -> dict:
+    dbg = NodeDebug(NODE_KEY, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
+    try:
+        query = (state.get("query") or "").strip()
+        context = state.get("context") or ""
+        messages = [
+            {{"role": "system", "content": AGENT_SYSTEM}},
+            {{"role": "user", "content": f"{{query}}\\n\\n{{context}}" if context else query}},
+        ]
+        text = chat_text(messages, temperature=0.2)
+        return dbg.ok({{"{out_field}": text}})
+    except Exception as exc:
+        return dbg.fail(exc, fallback={{"{out_field}": ""}}, error_field="{func_name}_error")
+'''
+            target = nodes_dir / f"{func_name}.py"
+            target.write_text(node_src, encoding="utf-8")
+            generated_files.append(str(target.relative_to(out)))
+            export_names.append(f"{func_name}_node")
+            node_func_by_lg[lg] = f"{func_name}_node"
+            continue
+
+        # --- tool / parameter-extractor: stub ---
+        if dtype in ("tool", "parameter-extractor"):
+            out_field = f"{func_name}_result"
+            state_fields.add(out_field)
+            node_src = f'''"""節點：{dtype} stub — TODO: implement
+
+DSL: {dtype} / {title}
+DSL_ID: {nid}
+{f"merge note: {merge_doc}" if merge_doc else ""}
+讀取: query
+寫入: {out_field}
+"""
+
+from __future__ import annotations
+
+from node_debug import NodeDebug
+from state import WorkflowState
+
+NODE_KEY = "{func_name}"
+DSL_TYPE = {_py_str(dtype)}
+DSL_TITLE = {_py_str(title)}
+DSL_ID = {_py_str(nid)}
+READS = ("query",)
+WRITES = ({_py_str(out_field)},)
+
+
+def {func_name}_node(state: WorkflowState) -> dict:
+    dbg = NodeDebug(NODE_KEY, DSL_TYPE, DSL_TITLE, DSL_ID, state, READS)
+    # TODO: implement {dtype} logic
+    return dbg.ok({{"{out_field}": None}})
+'''
+            target = nodes_dir / f"{func_name}.py"
+            target.write_text(node_src, encoding="utf-8")
+            generated_files.append(str(target.relative_to(out)))
+            export_names.append(f"{func_name}_node")
+            node_func_by_lg[lg] = f"{func_name}_node"
+            continue
+
         # generic template fill
         mapping = {
             "DSL_TITLE": title,
@@ -716,7 +1072,7 @@ def {func_name}_node(state: WorkflowState) -> dict:
                 "state.get(\"llm_text\")\n            or state.get(\"final_answer\")\n            or state.get(\"direct_answer\")\n            or state.get(\"answer\")",
             )
             if inventory.get("has_citation"):
-                if "link_citations" not in node_src:
+                if "from logic import link_citations" not in node_src:
                     node_src = node_src.replace(
                         "from node_debug import NodeDebug",
                         "from logic import link_citations\nfrom node_debug import NodeDebug",
@@ -811,19 +1167,23 @@ def {func_name}_node(state: WorkflowState) -> dict:
 
     init_lines = ['"""Node exports (auto-generated)."""', ""]
     for name in uniq_exports:
-        mod = name[: -len("_node")] if name.endswith("_node") else name
-        # route_ special
-        if name.startswith("route_"):
-            mod = name  # function lives in route_*.py named route_x — file stem = name without worrying
-            # our files for if-else are route_*.py with def route_* 
-            file_mod = name  # actually file is route_foo.py with def route_foo — export route_foo not route_foo_node
-        file_mod = {
+        well_known = {
             "normalize_input_node": "normalize_input",
             "answer_node": "answer",
             "order_citations_node": "order_citations",
             "build_context_node": "build_context",
             "retrieve_node": "retrieve",
-        }.get(name, name[: -5] if name.endswith("_node") else name)
+        }
+        if name in well_known:
+            file_mod = well_known[name]
+        elif name.startswith("route_after_"):
+            file_mod = name.replace("route_after_", "")
+        elif name.startswith("route_") and not name.endswith("_node"):
+            file_mod = name
+        elif name.endswith("_node"):
+            file_mod = name[:-5]
+        else:
+            file_mod = name
         init_lines.append(f"from nodes.{file_mod} import {name}")
     init_lines.append("")
     init_lines.append(f"__all__ = {uniq_exports!r}")
@@ -831,19 +1191,63 @@ def {func_name}_node(state: WorkflowState) -> dict:
     (nodes_dir / "__init__.py").write_text("\n".join(init_lines), encoding="utf-8")
     generated_files.append("nodes/__init__.py")
 
-    # --- graph.py ---
+    # --- graph.py (with conditional edges) ---
     order = _topo_order(inventory, id_to_lg)
-    # ensure all implement lg present
     for row in implement_rows:
         lg = row.get("langgraph_node")
         if lg and lg not in order and row.get("action") == "implement":
             order.append(str(lg))
 
-    import_names = []
+    # answer must come after llm_answer
+    if "answer" in order and "llm_answer" in order:
+        ai = order.index("answer")
+        li = order.index("llm_answer")
+        if ai < li:
+            order.remove("answer")
+            order.insert(li, "answer")
+
+    # Build conditional edge map from dify_branch_edges
+    branch_edges = inventory.get("dify_branch_edges") or []
+    # source_lg → {handle: target_lg}
+    cond_map: dict[str, dict[str, str]] = {}
+    # track which nodes are branch-source types
+    branch_source_types: dict[str, str] = {}
+    for be in branch_edges:
+        src_id = str(be.get("source_id") or "")
+        tgt_id = str(be.get("target_id") or "")
+        handle = str(be.get("source_handle") or "")
+        src_type = str(be.get("source_type") or "")
+        src_lg = id_to_lg.get(src_id)
+        tgt_lg = id_to_lg.get(tgt_id)
+        if src_lg and tgt_lg and handle:
+            cond_map.setdefault(src_lg, {})[handle] = tgt_lg
+            branch_source_types[src_lg] = src_type
+
+    # Collect all import names (node functions + route functions)
+    import_names: list[str] = []
+    route_func_imports: list[str] = []
     for lg in order:
         fn = node_func_by_lg.get(lg)
         if fn and fn not in import_names:
             import_names.append(fn)
+    # add route functions for conditional edges
+    for src_lg, src_type in branch_source_types.items():
+        if src_type == "question-classifier":
+            # find the classify func name
+            for row in implement_rows:
+                if row.get("langgraph_node") == src_lg and row.get("dify_type") == "question-classifier":
+                    fn_base = _safe_ident(src_lg)
+                    route_fn = f"route_after_{fn_base}"
+                    if route_fn not in import_names:
+                        route_func_imports.append(route_fn)
+                    break
+        elif src_type == "if-else":
+            route_suffix = src_lg.replace("route_", "") if src_lg.startswith("route_") else src_lg
+            route_fn = f"route_{route_suffix}"
+            if route_fn not in import_names:
+                route_func_imports.append(route_fn)
+
+    all_imports = import_names + route_func_imports
 
     graph_lines = [
         '"""LangGraph workflow (auto-generated from dify_node_mapping / edges)."""',
@@ -854,7 +1258,7 @@ def {func_name}_node(state: WorkflowState) -> dict:
         "",
         "from nodes import (",
     ]
-    for fn in import_names:
+    for fn in all_imports:
         graph_lines.append(f"    {fn},")
     graph_lines += [
         ")",
@@ -869,18 +1273,99 @@ def {func_name}_node(state: WorkflowState) -> dict:
         if not fn:
             continue
         graph_lines.append(f'    workflow.add_node("{lg}", {fn})')
+
+    # Build edges: conditional for branch sources, linear for others.
+    order_idx: dict[str, int] = {n: i for i, n in enumerate(order)}
+
+    # For each branch source, compute a convergence node: the first node
+    # in the topo order after the source that is NOT one of its targets.
+    convergence: dict[str, str | None] = {}
+    for src_lg, path_map in cond_map.items():
+        targets = set(path_map.values())
+        src_i = order_idx.get(src_lg, -1)
+        conv: str | None = None
+        for j in range(src_i + 1, len(order)):
+            if order[j] not in targets:
+                conv = order[j]
+                break
+        convergence[src_lg] = conv
+
+    # Which branch source "owns" each conditional target (first match)
+    target_owner: dict[str, str] = {}
+    for src_lg, path_map in cond_map.items():
+        for tgt in path_map.values():
+            target_owner.setdefault(tgt, src_lg)
+
+    emitted_out: set[str] = set()
+
     if order:
         graph_lines.append(f'    workflow.add_edge(START, "{order[0]}")')
-        for a, b in zip(order, order[1:]):
-            graph_lines.append(f'    workflow.add_edge("{a}", "{b}")')
-        graph_lines.append(f'    workflow.add_edge("{order[-1]}", END)')
+        for i, src in enumerate(order):
+            if src in cond_map:
+                path_map = cond_map[src]
+                src_type = branch_source_types.get(src, "")
+
+                if src_type == "question-classifier":
+                    fn_base = _safe_ident(src)
+                    route_fn_name = f"route_after_{fn_base}"
+                elif src_type == "if-else":
+                    route_suffix = src.replace("route_", "") if src.startswith("route_") else src
+                    route_fn_name = f"route_{route_suffix}"
+                else:
+                    label_field = f"{src}_label"
+                    route_fn_name = f'lambda s: s.get("{label_field}", "false")'
+
+                # keep ALL handles — route function may return any of them
+                seen_handles: set[str] = set()
+                path_entries: list[str] = []
+                for handle, tgt in path_map.items():
+                    if handle in seen_handles:
+                        continue
+                    # skip self-loops (node routing back to itself)
+                    if tgt == src:
+                        continue
+                    seen_handles.add(handle)
+                    path_entries.append(f'            {_py_str(handle)}: "{tgt}",')
+
+                # add fallback to convergence or END (only if "false" not already present)
+                has_false = any(h == "false" for h in path_map.keys())
+                if not has_false:
+                    conv = convergence.get(src)
+                    if conv and conv not in {t for t in path_map.values()}:
+                        path_entries.append(f'            "false": "{conv}",')
+                    else:
+                        path_entries.append(f'            "false": END,')
+
+                graph_lines.append(f"    workflow.add_conditional_edges(")
+                graph_lines.append(f'        "{src}",')
+                graph_lines.append(f"        {route_fn_name},")
+                graph_lines.append("        {")
+                graph_lines.extend(path_entries)
+                graph_lines.append("        },")
+                graph_lines.append("    )")
+                emitted_out.add(src)
+
+            elif src in target_owner:
+                # Conditional target: connect to convergence of owner,
+                # but only if convergence comes AFTER this node.
+                owner = target_owner[src]
+                conv = convergence.get(owner)
+                if conv and order_idx.get(conv, -1) > i:
+                    graph_lines.append(f'    workflow.add_edge("{src}", "{conv}")')
+                else:
+                    graph_lines.append(f'    workflow.add_edge("{src}", END)')
+                emitted_out.add(src)
+
+            else:
+                # Regular node
+                if i + 1 < len(order):
+                    nxt = order[i + 1]
+                    graph_lines.append(f'    workflow.add_edge("{src}", "{nxt}")')
+                else:
+                    graph_lines.append(f'    workflow.add_edge("{src}", END)')
+                emitted_out.add(src)
+
     graph_lines += ["    return workflow.compile()", "", "", "graph = build_graph()", ""]
-    # note branch edges
-    if inventory.get("dify_branch_edges"):
-        graph_lines.insert(
-            2,
-            f"# TODO: conditional edges from dify_branch_edges ({len(inventory['dify_branch_edges'])} rules)",
-        )
     (out / "graph.py").write_text("\n".join(graph_lines), encoding="utf-8")
     generated_files.append("graph.py")
 
@@ -917,13 +1402,17 @@ def {func_name}_node(state: WorkflowState) -> dict:
     env_rows = _extract_env_defaults(dsl)
     env_example = out / ".env.example"
     if env_example.exists() and env_rows:
+        text = env_example.read_text(encoding="utf-8")
         extra = ["", "# --- from Dify environment_variables ---"]
-        for name, value, desc in env_rows:
+        any_new = False
+        for ename, value, desc in env_rows:
+            if f"{ename}=" in text:
+                continue
+            any_new = True
             if desc:
                 extra.append(f"# {desc}")
-            extra.append(f"{name}={value}")
-        text = env_example.read_text(encoding="utf-8")
-        if "UAS_BASE_URL" not in text and any(n == "UAS_BASE_URL" for n, _, _ in env_rows):
+            extra.append(f"{ename}={value}")
+        if any_new:
             env_example.write_text(text.rstrip() + "\n" + "\n".join(extra) + "\n", encoding="utf-8")
             generated_files.append(".env.example")
 
@@ -1017,7 +1506,7 @@ def {func_name}_node(state: WorkflowState) -> dict:
     if inventory.get("has_rag"):
         report["warnings"].append("has_rag=true：確認 scaffold 有 --with-pgvector，並實作 retrieve")
     if inventory.get("dify_branch_edges"):
-        report["warnings"].append("存在 dify_branch_edges：graph 僅線性接線，請補 conditional edges")
+        report["warnings"].append(f"已生成 {len(cond_map)} 組 conditional edges；請校對路由邏輯")
     if not dsl:
         report["warnings"].append("未提供 --dsl：code／prompt 可能只有截斷 excerpt")
     (out / "GENERATE_REPORT.json").write_text(

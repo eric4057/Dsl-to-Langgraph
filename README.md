@@ -9,6 +9,7 @@
 
 | 程式 | 路徑 | 用途 |
 |---|---|---|
+| **一鍵部署** | [`scripts/deploy.py`](scripts/deploy.py) | DSL → parse → generate（含 conditional edges）→ install → start → health check |
 | DSL 瘦身 | [`scripts/slim_dsl.py`](scripts/slim_dsl.py) | 去除大型匯出檔的 UI／佈局雜訊，並遮罩明顯密鑰，供後續解析或交給 agent |
 | DSL 解析 | [`scripts/parse_dsl.py`](scripts/parse_dsl.py) | 產出 inventory；Dify 另含 `dify_node_mapping`、`dify_branch_edges`、`has_citation` |
 | 專案骨架 | [`scripts/scaffold_project.py`](scripts/scaffold_project.py) | 產生 LangGraph 骨架；`--with-pgvector` 時加 RAG 資料庫（compose／schema／ingest） |
@@ -104,7 +105,26 @@ python3 scripts/generate_from_inventory.py \
 
 這不是把「既有 LangGraph Server API」自動轉成 OpenAI 的獨立轉接器，而是產出專案時**內建**這層包裝（LangGraph 在內、OpenAI 格式在外）。完整遷移時 `SKILL.md` 要求必須保留此 API。
 
-## CLI 完整流程
+## 快速開始（一鍵部署）
+
+```bash
+pip install pyyaml
+
+python3 scripts/deploy.py your-flow.yml \
+  --name my-bot --model-name my-bot --port 8030 --out ./my-bot
+```
+
+執行後自動完成：slim → parse → scaffold + generate（含 conditional edges）→ venv + pip install → `.env` → compile check → 啟動 → health check。
+
+使用者只需事後填 `.env` 中的 LLM 連線資訊再重啟：
+
+```bash
+cd ./my-bot
+# 編輯 .env（填入 OPENAI_BASE_URL, OPENAI_API_KEY, CHAT_MODEL）
+source .venv/bin/activate && python api.py
+```
+
+## CLI 分步流程
 
 ```bash
 cd /path/to/dsl-to-langgraph
@@ -113,12 +133,12 @@ pip install pyyaml
 
 python3 scripts/slim_dsl.py your-flow.yml -o /tmp/your-flow.slim.yml
 python3 scripts/parse_dsl.py /tmp/your-flow.slim.yml -o /tmp/inventory.json
-python3 scripts/scaffold_project.py \
-  --name "my-app" --out ./my-app --model-name my-app --port 8030
-  # --port 可改成任意可用埠；省略則預設 8000
+python3 scripts/generate_from_inventory.py \
+  --inventory /tmp/inventory.json --dsl your-flow.yml \
+  --out ./my-app --scaffold --name my-app --model-name my-app --port 8030
 ```
 
-接著依 [`SKILL.md`](SKILL.md)，以 inventory 為依據實作真實節點（語意等價遷移，而非逐一搬運所有 glue 節點）。
+接著依 [`SKILL.md`](SKILL.md)，校對 selector／`.env` 並驗收。
 
 ## 倉庫結構
 
@@ -129,9 +149,11 @@ python3 scripts/scaffold_project.py \
 ├── gpt/CUSTOM_GPT_INSTRUCTIONS.md
 ├── references/
 ├── scripts/
+│   ├── deploy.py                # 一鍵部署
 │   ├── slim_dsl.py
 │   ├── parse_dsl.py
-│   └── scaffold_project.py
+│   ├── scaffold_project.py
+│   └── generate_from_inventory.py
 └── assets/templates/
 ```
 

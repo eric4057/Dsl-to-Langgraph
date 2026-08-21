@@ -4,6 +4,13 @@
 > **範圍原則：** 以 **Dify DSL** 工項為準；inventory 沒有就不做。  
 > 實作清單以 `dify_node_mapping` 的 implement 列為準。
 
+## 一鍵部署（deploy.py）
+
+- [ ] `deploy.py` 產出 → 所有 `py_compile` 通過
+- [ ] `graph.py` 含 `add_conditional_edges`（有分支邊時）
+- [ ] 伺服器自動啟動 → `/health` 回傳 OK
+- [ ] `.env` 已產出（填入 LLM 連線後 `/v1/chat/completions` 可正常回答）
+
 ## 解析與設計
 
 - [ ] 已辨識為 Dify（或註明次要格式）

@@ -11,3 +11,5 @@ build/
 .DS_Store
 inventory.json
 /tmp-scaffold-*/
+my-app/
+inventory.json

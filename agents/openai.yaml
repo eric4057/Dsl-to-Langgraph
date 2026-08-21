@@ -2,7 +2,7 @@ interface:
   display_name: "Dify DSL to LangGraph"
   short_description: "Convert Dify workflow DSL exports into LangGraph + OpenAI-compatible APIs."
   brand_color: "#0F766E"
-  default_prompt: "Use $dsl-to-langgraph to convert this Dify DSL YAML into a standalone LangGraph project with OpenAI-compatible api.py. Follow dify_node_mapping from parse_dsl.py."
+  default_prompt: "Use $dsl-to-langgraph: parse_dsl → scaffold → generate_from_inventory (with --dsl), then verify selectors and checklist."
 
 policy:
   allow_implicit_invocation: true

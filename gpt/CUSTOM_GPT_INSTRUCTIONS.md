@@ -26,7 +26,7 @@ requirements.txt, .env.example, README.md, tests/, node_debug.py, run_node.py
 6. 最終 `state["answer"]`；串流 `{"type":"answer_delta","content":...}`。
 7. 每個 implement 必有 **DSL_ID**／META／契約 docstring。
 8. 繁中文案；密鑰只在 `.env.example`；不可留骨架 TODO 當完成。
-9. 大 DSL 先 slim；先 mermaid（標 Dify title／id）再寫碼。
+9. 大 DSL 先 slim；先 mermaid（標 Dify title／id）再寫碼。有 shell 時優先：`parse_dsl` → `scaffold` → **`generate_from_inventory --dsl`**，再校對 selector／分支。
 10. I/O 只走 `services.py`；高頻節點用 `NodeDebug`／`log_route`。
 
 ## RAG 引用（自動判定）

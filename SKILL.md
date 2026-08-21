@@ -63,13 +63,14 @@ Agent-agnostic skill（Cursor / OpenClaw / GPT / Codex / 任何能讀 SKILL.md �
 ```text
 Progress:
 - [ ] 0. （建議）預處理瘦身大 DSL
-- [ ] 1. 辨識 DSL 並解析圖
-- [ ] 2. 畫出目標 LangGraph 拓撲
-- [ ] 3. 定義 WorkflowState
+- [ ] 1. 辨識 DSL 並解析圖 → inventory.json
+- [ ] 2. 畫出目標 LangGraph 拓撲（對照 dify_node_mapping）
+- [ ] 3. 定義／確認 WorkflowState 欄位
 - [ ] 4. scaffold 專案骨架
-- [ ] 5. 實作 nodes / graph / config / services
-- [ ] 6. 實作 OpenAI-compatible api.py
-- [ ] 7. README、.env.example、測試
+- [ ] 4b. **generate_from_inventory**（自動化填 nodes／graph／logic／prompts）
+- [ ] 5. 校對 selector／merge 註解／環境變數；補 conditional edges（若有）
+- [ ] 6. 確認 OpenAI-compatible api.py（上傳節點才加 /v1/files）
+- [ ] 7. README、.env、測試
 - [ ] 8. 對照 checklist 驗收
 ```
 
@@ -183,11 +184,53 @@ python3 "$SKILL_DIR/scripts/scaffold_project.py" \
 
 - `--port` **可自訂**（寫入 `API_PORT`）；省略則預設 `8000`。產出後也可在 `.env` 改 `API_PORT`。
 - 中文／非 ASCII 專案名會得到 `app-<hash>` slug；**務必**用 `--model-name` 指定對外模型名。
-- scaffold 的 `nodes/answer.py` 僅是骨架佔位；**交付前必須換成 DSL 真實邏輯**，不可把骨架 TODO／stub 當完成。
+- scaffold 的 `nodes/answer.py` 僅是骨架佔位；**下一步必須跑 `generate_from_inventory.py`（或手動依 mapping 換掉）**，不可把骨架 TODO／stub 當完成。
 
-#### 4b. DSL 需要知識庫時（`has_rag=true`）→ 建 pgvector
+#### 4b. 依 inventory 自動產生節點（建議；半自動主路徑）
 
-**skill 自動依 inventory 判斷**；有 `knowledge-retrieval` 就加，沒有就不要建。
+把「逐列 mapping → 複製模板、填 META、接 has_rag／has_citation／merge 註記、組 graph」自動化：
+
+```bash
+python3 "$SKILL_DIR/scripts/generate_from_inventory.py" \
+  --inventory <inventory.json> \
+  --dsl <original-or-slim.yml> \
+  --out <target_dir> \
+  --force
+```
+
+一次做完 scaffold + generate（`--out` 須為空目錄）：
+
+```bash
+python3 "$SKILL_DIR/scripts/generate_from_inventory.py" \
+  --inventory <inventory.json> --dsl <flow.yml> --out <target_dir> \
+  --scaffold --name <project_name> --model-name <api_model> --port <port> \
+  [--with-pgvector]
+```
+
+腳本會：
+
+| 產出 | 說明 |
+|---|---|
+| `nodes/*.py` | 每個 `implement` 一檔；META／`DSL_ID` 已填 |
+| `graph.py` | 依 edges 線性串接；`has_citation` 插入 citation 鏈 |
+| `logic.py` | 嵌入 Dify `code` 的 `main`（需 `--dsl` 才完整） |
+| `prompts.py` | 抽出 LLM system／user 模板 + 粗略 selector 替換 |
+| `state.py` | 依輸出欄位擴充 |
+| `GENERATE_REPORT.json` | merge 對照、警告（分支邊等） |
+
+**腳本不做／需 Agent 校對：**
+
+- `dify_branch_edges` → `add_conditional_edges`（報告會警告）
+- merge 節點的整理邏輯實際呼叫（只在目標節點註明 merged from）
+- `{{#nodeId.field#}}` 複雜 selector 對齊
+- `/v1/files`、真實 `.env` 連線與行為驗收
+
+無執行環境時：仍依 §3b 手動複製模板（等價於腳本行為）。
+
+#### 4c. DSL 需要知識庫時（`has_rag=true`）→ 建 pgvector
+
+**skill 自動依 inventory 判斷**；有 `knowledge-retrieval` 就加，沒有就不要建。  
+`generate_from_inventory.py --scaffold` 在 `has_rag=true` 時會自動帶 `--with-pgvector`（亦可顯式傳入）。
 
 ```bash
 python3 "$SKILL_DIR/scripts/scaffold_project.py" \
@@ -209,8 +252,9 @@ python rag/ingest_pgvector.py --dir ./docs --collection default
 
 無腳本時：複製 `assets/templates/`（含 `rag/`）並替換 `{{PROJECT_NAME}}`、`{{API_MODEL}}`、`{{API_PORT}}`、`{{PROJECT_SLUG}}`、`{{GRAPH_EXPORT}}`、`{{PGVECTOR_PORT}}`、`{{EMBEDDING_DIM}}`。
 
-### 5–6. 實作慣例
+### 5–6. 實作慣例（generate 之後）
 
+- **優先跑完 §4b**，再人工校對，勿從零手寫節點形狀
 - 一邏輯區塊 → 一個 `nodes/*.py`；`graph.py` 只組裝
 - `config.py`：pydantic-settings + `.env`
 - API 必備：`POST /v1/chat/completions`（含 stream）、`GET /v1/models`、`GET /health`

@@ -28,7 +28,9 @@
 ## 節點結構化（禁止自由發揮）
 
 - [ ] 已依 `dify_node_mapping` **逐列**處理（implement／merge／ignore）
-- [ ] 每個 `implement` 都從對應 `.tmpl` 複製，未自創形狀
+- [ ] （建議）已跑 `scripts/generate_from_inventory.py`，或手動等價完成
+- [ ] 已讀 `GENERATE_REPORT.json` 警告（分支邊／缺 --dsl 等）
+- [ ] 每個 `implement` 都從對應 `.tmpl` 複製／產生，未自創形狀
 - [ ] 每個 implement 檔含 META：`NODE_KEY`／`DSL_TYPE`／`DSL_TITLE`／`DSL_ID`／`READS`／`WRITES`
 - [ ] 函式名對齊 mapping 的 `langgraph_node`（`*_node` 或 `route_*`）
 - [ ] `merge`／`ignore` **沒有**對應空檔；merge 有在目標節點註明源 dify_id

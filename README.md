@@ -12,6 +12,7 @@
 | DSL 瘦身 | [`scripts/slim_dsl.py`](scripts/slim_dsl.py) | 去除大型匯出檔的 UI／佈局雜訊，並遮罩明顯密鑰，供後續解析或交給 agent |
 | DSL 解析 | [`scripts/parse_dsl.py`](scripts/parse_dsl.py) | 產出 inventory；Dify 另含 `dify_node_mapping`、`dify_branch_edges`、`has_citation` |
 | 專案骨架 | [`scripts/scaffold_project.py`](scripts/scaffold_project.py) | 產生 LangGraph 骨架；`--with-pgvector` 時加 RAG 資料庫（compose／schema／ingest） |
+| **依 inventory 產生節點** | [`scripts/generate_from_inventory.py`](scripts/generate_from_inventory.py) | 讀 mapping + 模板（建議加 `--dsl`）→ 寫出 `nodes/`、`graph.py`、`logic.py`、`prompts.py` |
 
 輔助文件：[`SKILL.md`](SKILL.md)（agent 遷移流程）、[`references/`](references/)（對映／契約／範例／驗收）、[`assets/templates/`](assets/templates/)（骨架與**各節點類型**模板）、[`agents/openai.yaml`](agents/openai.yaml)、[`gpt/CUSTOM_GPT_INSTRUCTIONS.md`](gpt/CUSTOM_GPT_INSTRUCTIONS.md)。
 
@@ -68,6 +69,27 @@ python3 scripts/scaffold_project.py \
 產出後也可在專案 `.env` 用 `API_PORT=` 隨時改埠，不必重跑 scaffold。
 
 骨架中的 `nodes/answer.py` 僅為佔位實作；交付前須改寫為 DSL 對應邏輯。
+
+### `scripts/generate_from_inventory.py`
+
+在 scaffold 之後（或加 `--scaffold` 一次做完），依 `dify_node_mapping` **自動產生**結構化節點與 `graph.py`：
+
+```bash
+python3 scripts/parse_dsl.py flow.yml -o inventory.json
+python3 scripts/generate_from_inventory.py \
+  --inventory inventory.json --dsl flow.yml --out ./my-app \
+  --scaffold --name my-app --model-name my-app --port 8030
+```
+
+| 參數 | 說明 |
+|---|---|
+| `--inventory` | `parse_dsl.py` 產出 |
+| `--dsl` | **強烈建議**：原始／slim YAML，才能嵌入完整 code／prompt |
+| `--out` | 專案目錄 |
+| `--scaffold` | 目錄為空時先跑 scaffold；`has_rag` 時可加 `--with-pgvector` |
+| `--force` | 覆寫已產生的 nodes |
+
+產出含 `GENERATE_REPORT.json`（merge 對照、警告）。Agent 仍須校對 selector、補 conditional edges、填 `.env` 並驗收。
 
 ## OpenAI-compatible API（LangGraph 對外介面）
 
